@@ -12,7 +12,8 @@ EXCLUDED_DIRS = {
     "__pycache__",
     ".pytest_cache",
     "reports",
-    "src/research_assistant.egg-info",
+    "projects",
+    "src/research_pilot.egg-info",
 }
 EXCLUDED_FILES = {
     ".env",
