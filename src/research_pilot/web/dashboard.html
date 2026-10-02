@@ -1,0 +1,553 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Research Pilot</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&display=swap" rel="stylesheet">
+<style>
+:root {
+  --page: #edf1f4;
+  --surface: #fafbfc;
+  --sunk: #e3e9ee;
+  --ink: #15232e;
+  --graphite: #5b6c79;
+  --rule: #cdd6dd;
+  --cobalt: #2b4acb;
+  --cobalt-soft: #dfe5fb;
+  --tier-lite: #a7c0d3;
+  --tier-coding: #6585a6;
+  --tier-strong: #23405f;
+  --tier-code: #9aa8b3;
+  --ev-supported: #1d7a4c;
+  --ev-partial: #a8701a;
+  --ev-hypothesis: #5a4ec2;
+  --ev-speculation: #8b6fae;
+  --ev-contradicted: #b13a3a;
+  --ev-unknown: #8a97a1;
+  --serif: "Source Serif 4", Georgia, "Times New Roman", serif;
+  --sans: "Instrument Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --page: #10171d; --surface: #172129; --sunk: #1e2a33; --ink: #e4ebf0; --graphite: #9aabb8; --rule: #2c3a45;
+    --cobalt: #7d95f2; --cobalt-soft: #233066; --tier-lite: #8eaac0; --tier-coding: #5f86ad; --tier-strong: #c9dbea; --tier-code: #6b7a86;
+    --ev-supported: #4fbf86; --ev-partial: #e0a547; --ev-hypothesis: #9b91f0; --ev-speculation: #b79bd6; --ev-contradicted: #ef7b7b; --ev-unknown: #8796a2;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --page: #10171d; --surface: #172129; --sunk: #1e2a33; --ink: #e4ebf0; --graphite: #9aabb8; --rule: #2c3a45;
+  --cobalt: #7d95f2; --cobalt-soft: #233066; --tier-lite: #8eaac0; --tier-coding: #5f86ad; --tier-strong: #c9dbea; --tier-code: #6b7a86;
+  --ev-supported: #4fbf86; --ev-partial: #e0a547; --ev-hypothesis: #9b91f0; --ev-speculation: #b79bd6; --ev-contradicted: #ef7b7b; --ev-unknown: #8796a2;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--page); color: var(--ink); font: 15px/1.5 var(--sans); font-variant-numeric: tabular-nums; }
+button, input, textarea, select { font: inherit; color: inherit; }
+a { color: var(--cobalt); }
+:focus-visible { outline: 2px solid var(--cobalt); outline-offset: 2px; }
+.serif { font-family: var(--serif); }
+.muted { color: var(--graphite); }
+.small { font-size: 13px; }
+
+/* header */
+header.bar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 18px; padding: 14px 24px; border-bottom: 1px solid var(--rule); background: var(--surface); }
+.brand { font-weight: 700; font-size: 17px; letter-spacing: -0.01em; margin-right: 6px; }
+.brand span { font-weight: 500; color: var(--graphite); }
+select.project { min-width: 0; max-width: 360px; padding: 7px 10px; border: 1px solid var(--rule); border-radius: 6px; background: var(--page); }
+.status { display: inline-flex; align-items: center; gap: 8px; font-weight: 500; }
+.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--ev-unknown); }
+.dot.running { background: var(--cobalt); }
+.dot.completed { background: var(--ev-supported); }
+.dot.failed { background: var(--ev-contradicted); }
+.dot.awaiting_experiments, .dot.paused { background: var(--ev-partial); }
+.spacer { flex: 1; }
+.btn { border: 1px solid var(--rule); background: var(--surface); padding: 7px 14px; border-radius: 6px; cursor: pointer; font-weight: 500; }
+.btn:hover { border-color: var(--graphite); }
+.btn.primary { background: var(--cobalt); border-color: var(--cobalt); color: #fff; }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+
+/* swarm strip */
+.strip { padding: 18px 24px 8px; border-bottom: 1px solid var(--rule); }
+.strip-head { display: flex; flex-wrap: wrap; gap: 6px 28px; align-items: baseline; }
+.strip-head h1 { overflow-wrap: anywhere; font-size: 22px; line-height: 1.25; margin: 0; font-family: var(--serif); font-weight: 600; max-width: 62ch; }
+.stores { display: flex; flex-wrap: wrap; gap: 4px 22px; margin-left: auto; font-size: 13px; color: var(--graphite); }
+.stores b { color: var(--ink); font-weight: 600; }
+svg.swarm { width: 100%; height: auto; display: block; margin-top: 6px; }
+.swarm .chain { stroke: var(--rule); stroke-width: 2; }
+.swarm .loop { fill: none; stroke: var(--graphite); stroke-width: 1.4; stroke-dasharray: 4 4; opacity: .75; }
+.swarm .loop-label { fill: var(--graphite); font-size: 11.5px; paint-order: stroke; stroke: var(--page); stroke-width: 5px; stroke-linejoin: round; }
+.swarm .node circle.ring { fill: var(--surface); stroke: var(--rule); stroke-width: 2; }
+.swarm .node.used circle.ring { stroke: var(--graphite); }
+.swarm .node.active circle.ring { stroke: var(--cobalt); stroke-width: 3; }
+.swarm .node.failed circle.ring { stroke: var(--ev-contradicted); }
+.swarm .node .num { font-weight: 700; font-size: 15px; fill: var(--ink); text-anchor: middle; dominant-baseline: central; }
+.swarm .node .name { font-size: 12.5px; fill: var(--ink); text-anchor: middle; }
+.swarm .node .count { font-size: 11.5px; fill: var(--graphite); text-anchor: middle; }
+.swarm .node .pulse { fill: none; stroke: var(--cobalt); stroke-width: 2; opacity: 0; }
+.swarm .node.active .pulse { animation: pulse 1.6s ease-out infinite; }
+@keyframes pulse { from { r: 24; opacity: .6; } to { r: 38; opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .swarm .node.active .pulse { animation: none; opacity: .5; r: 30; } }
+.agent-list { display: none; list-style: none; padding: 0; margin: 10px 0 0; }
+.agent-list li { display: grid; grid-template-columns: 26px 1fr auto; gap: 8px; align-items: center; padding: 7px 0; border-top: 1px solid var(--rule); }
+.agent-list li.active { color: var(--cobalt); font-weight: 600; }
+.phases { display: flex; gap: 3px; margin: 6px 0 10px; }
+.phases div { flex: 1; height: 5px; border-radius: 3px; background: var(--sunk); }
+.phases div.past { background: var(--tier-lite); }
+.phases div.now { background: var(--cobalt); }
+.phase-caption { font-size: 13px; color: var(--graphite); }
+
+/* body */
+main { display: grid; grid-template-columns: minmax(260px, 330px) minmax(0, 1fr); gap: 0; align-items: start; }
+aside { padding: 20px 22px 40px 24px; border-right: 1px solid var(--rule); min-height: 60vh; }
+aside section + section { margin-top: 26px; padding-top: 20px; border-top: 1px solid var(--rule); }
+aside h2, .pane h2 { font-size: 15px; margin: 0 0 10px; font-weight: 600; }
+.tierbar { display: flex; height: 14px; border-radius: 4px; overflow: hidden; background: var(--sunk); margin: 6px 0 10px; }
+.tierbar span { display: block; height: 100%; }
+.legend { display: grid; grid-template-columns: 12px 1fr auto; gap: 4px 8px; align-items: center; font-size: 13px; }
+.swatch { width: 12px; height: 12px; border-radius: 3px; }
+.sw-lite { background: var(--tier-lite); } .sw-coding { background: var(--tier-coding); } .sw-strong { background: var(--tier-strong); }
+.sw-code { border: 1.5px dashed var(--tier-code); }
+.checks { list-style: none; padding: 0; margin: 0; font-size: 14px; }
+.checks li { display: grid; grid-template-columns: 18px 1fr; gap: 6px; padding: 3px 0; }
+.checks .ok { color: var(--ev-supported); font-weight: 700; }
+.checks .no { color: var(--ev-contradicted); font-weight: 700; }
+.checks .detail { grid-column: 2; font-size: 12.5px; color: var(--graphite); }
+.queue { list-style: none; padding: 0; margin: 0; font-size: 14px; }
+.queue li { padding: 6px 0; border-top: 1px solid var(--rule); }
+.queue li:first-child { border-top: 0; }
+.queue .type { font-weight: 600; }
+.verdict { font-family: var(--serif); font-size: 17px; margin: 0 0 6px; }
+
+.workspace { min-width: 0; padding: 0 28px 48px; }
+.tabs { display: flex; flex-wrap: wrap; gap: 2px 18px; border-bottom: 1px solid var(--rule); margin-bottom: 18px; position: sticky; top: 0; background: var(--page); z-index: 2; padding-top: 14px; }
+.tabs button { border: 0; background: none; padding: 8px 0 10px; cursor: pointer; color: var(--graphite); font-weight: 500; border-bottom: 2px solid transparent; }
+.tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--cobalt); }
+.pane { max-width: 1100px; min-width: 0; overflow-x: auto; }
+.pane + .pane { margin-top: 30px; }
+
+table.data { width: 100%; border-collapse: collapse; font-size: 14px; }
+table.data th { text-align: left; font-weight: 600; color: var(--graphite); font-size: 13px; padding: 6px 10px 6px 0; border-bottom: 1px solid var(--rule); }
+table.data td { padding: 9px 10px 9px 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+table.data td.statement { font-family: var(--serif); font-size: 15.5px; line-height: 1.45; max-width: 60ch; }
+.wrap-table { overflow-x: auto; }
+.chip { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12.5px; font-weight: 600; white-space: nowrap; border: 1.5px solid currentColor; }
+.st-SUPPORTED { color: var(--ev-supported); } .st-PARTIALLY_SUPPORTED { color: var(--ev-partial); }
+.st-HYPOTHESIS { color: var(--ev-hypothesis); } .st-SPECULATION { color: var(--ev-speculation); }
+.st-CONTRADICTED { color: var(--ev-contradicted); } .st-UNKNOWN { color: var(--ev-unknown); }
+.sev-critical, .sev-fatal { color: var(--ev-contradicted); } .sev-major { color: var(--ev-partial); } .sev-minor { color: var(--ev-unknown); }
+.ids { font-size: 13px; color: var(--graphite); }
+.superseded { opacity: .55; }
+.superseded .statement { text-decoration: line-through; text-decoration-thickness: 1px; }
+.note { font-size: 13px; color: var(--graphite); margin-top: 3px; }
+.warn { border-left: 3px solid var(--ev-partial); padding: 8px 12px; background: var(--surface); margin: 0 0 16px; font-size: 14px; }
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px 28px; }
+.facts h3 { font-size: 13.5px; margin: 0 0 4px; color: var(--graphite); font-weight: 600; }
+.facts ul { margin: 0; padding-left: 18px; font-size: 14px; }
+.timeline { list-style: none; padding: 0; margin: 0; }
+.timeline li { display: grid; grid-template-columns: 120px 1fr; gap: 14px; padding: 12px 0; border-bottom: 1px solid var(--rule); }
+.timeline .kind { font-weight: 600; font-size: 13.5px; }
+.timeline .when { font-size: 12.5px; color: var(--graphite); }
+.timeline .what { font-family: var(--serif); font-size: 16px; }
+.empty { padding: 32px 0; color: var(--graphite); max-width: 52ch; }
+iframe.manuscript { width: 100%; min-height: 75vh; border: 1px solid var(--rule); border-radius: 8px; background: #fff; }
+pre.log { white-space: pre-wrap; font-size: 13px; background: var(--surface); padding: 12px; border-radius: 6px; border: 1px solid var(--rule); }
+details.new { background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; padding: 10px 14px; }
+details.new summary { cursor: pointer; font-weight: 600; }
+.form { display: grid; gap: 10px; margin-top: 12px; }
+.form label { display: grid; gap: 4px; font-size: 13.5px; font-weight: 500; }
+.form input, .form textarea { width: 100%; border: 1px solid var(--rule); border-radius: 6px; padding: 8px 10px; background: var(--page); }
+.form textarea { min-height: 80px; resize: vertical; }
+.error { color: var(--ev-contradicted); font-size: 13.5px; }
+
+@media (max-width: 900px) {
+  main { grid-template-columns: minmax(0, 1fr); }
+  aside { border-right: 0; border-bottom: 1px solid var(--rule); min-height: 0; padding: 18px 16px; }
+  .workspace { padding: 0 16px 40px; }
+  header.bar, .strip { padding-left: 16px; padding-right: 16px; }
+}
+@media (max-width: 720px) {
+  svg.swarm { display: none; }
+  .agent-list { display: block; }
+  .stores { margin-left: 0; }
+  .timeline li { grid-template-columns: 1fr; gap: 2px; }
+}
+</style>
+</head>
+<body>
+<header class="bar">
+  <div class="brand">Research Pilot <span>dashboard</span></div>
+  <select class="project" id="projectSelect" aria-label="Project"></select>
+  <div class="status" id="status"><span class="dot"></span><span>No project selected</span></div>
+  <div class="spacer"></div>
+  <button class="btn" id="cancelBtn" disabled>Pause</button>
+  <button class="btn primary" id="runBtn" disabled>Run</button>
+</header>
+
+<section class="strip" aria-label="Agent swarm">
+  <div class="strip-head">
+    <h1 id="title">Start a project to watch the swarm work</h1>
+    <div class="stores" id="stores"></div>
+  </div>
+  <svg class="swarm" id="swarm" viewBox="0 0 1200 262" role="img" aria-label="The 12 agents and their feedback loops"></svg>
+  <ol class="agent-list" id="agentList"></ol>
+  <div class="phases" id="phases" aria-hidden="true"></div>
+  <div class="phase-caption" id="phaseCaption"></div>
+</section>
+
+<main>
+  <aside>
+    <section>
+      <details class="new" id="newProject">
+        <summary>New project</summary>
+        <form class="form" id="newForm">
+          <label>Topic<input name="topic" required minlength="3" placeholder="e.g. retrieval-augmented generation under distribution shift"></label>
+          <label>Research question<input name="question" placeholder="What exactly do you want to find out?"></label>
+          <label>Proposal<textarea name="proposal" placeholder="Your idea in a few sentences (optional)"></textarea></label>
+          <label>Seed papers<input name="seeds" placeholder="DOIs or arXiv ids, comma separated"></label>
+          <label>Constraints<input name="constraints" placeholder="e.g. single GPU, two weeks"></label>
+          <button class="btn primary" type="submit">Create and run</button>
+          <div class="error" id="formError" role="alert"></div>
+        </form>
+      </details>
+    </section>
+    <section>
+      <h2>Model routing and spend</h2>
+      <div class="muted small" id="spendSummary">No model calls yet.</div>
+      <div class="tierbar" id="tierBar"></div>
+      <div class="legend" id="tierLegend"></div>
+      <p class="small muted" style="margin:10px 0 0">Tasks are routed by difficulty, not by agent. Searching, deduplication, statistics and citation formatting run as code.</p>
+    </section>
+    <section>
+      <h2>Completion</h2>
+      <p class="verdict" id="verdict">Not assessed yet.</p>
+      <ul class="checks" id="checks"></ul>
+    </section>
+    <section>
+      <h2>Next on the roadmap</h2>
+      <ul class="queue" id="queue"><li class="muted">Nothing queued.</li></ul>
+    </section>
+  </aside>
+
+  <div class="workspace">
+    <nav class="tabs" role="tablist" id="tabs"></nav>
+    <div id="tabBody"><p class="empty">Pick a project above, or create one to begin.</p></div>
+  </div>
+</main>
+
+<script>
+const AGENTS = [
+  ["field_scout", "Field Scout"], ["literature", "Literature Intelligence"], ["gap_novelty", "Gap & Novelty"],
+  ["proposal_critic", "Proposal Critic"], ["hypothesis_designer", "Hypothesis Designer"], ["experiment_designer", "Experiment Designer"],
+  ["experiment_engineer", "Experiment Engineer"], ["quant_analyst", "Quantitative Analyst"], ["interpreter", "Scientific Interpreter"],
+  ["planner", "Research Planner"], ["paper_architect", "Paper Architect"], ["red_team", "Red-Team Reviewer"],
+];
+const LOOPS = [
+  [12, 10, "criticisms, missing evidence"], [10, 6, "new experiments or hypotheses"],
+  [10, 2, "more literature"], [10, 4, "pivot or revise proposal"],
+];
+const PHASES = ["initialization", "literature_discovery", "proposal_validation", "hypothesis_formation", "experimental_design", "experimental_execution", "research_loop", "paper_production", "completed"];
+const TIERS = [["lite", "Lite"], ["coding", "Coding"], ["strong", "Strong"]];
+const TABS = [["claims", "Claims and evidence"], ["research", "Hypotheses and experiments"], ["literature", "Literature"], ["decisions", "Decisions"], ["review", "Critique and review"], ["manuscript", "Manuscript"], ["activity", "Activity"]];
+
+const S = { projects: [], id: "", overview: null, tab: "claims", lastStep: -1, timer: null, key: "" };
+const themeParam = new URLSearchParams(location.search).get("theme");
+if (themeParam === "light" || themeParam === "dark") document.documentElement.dataset.theme = themeParam;
+try { S.key = localStorage.getItem("swarm-api-key") || ""; S.tab = localStorage.getItem("swarm-tab") || "claims"; } catch (e) {}
+
+const $ = (id) => document.getElementById(id);
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const words = (s) => String(s || "").replace(/_/g, " ");
+const cap = (s) => { s = words(s); return s.charAt(0).toUpperCase() + s.slice(1); };
+const chip = (state) => `<span class="chip st-${esc(state)}">${esc(cap(String(state).toLowerCase()))}</span>`;
+const fmt = (v, d = 4) => (v === null || v === undefined) ? "n/a" : Number(v).toFixed(d);
+
+async function api(path, opts = {}) {
+  const headers = { "Content-Type": "application/json", ...(S.key ? { "X-API-Key": S.key } : {}) };
+  const res = await fetch(path, { ...opts, headers });
+  if (res.status === 401) {
+    const key = window.prompt("This server needs an API key (X-API-Key). Enter it to continue:");
+    if (key) { S.key = key; try { localStorage.setItem("swarm-api-key", key); } catch (e) {} return api(path, opts); }
+    throw new Error("Unauthorized");
+  }
+  if (!res.ok) { let detail = res.statusText; try { detail = (await res.json()).detail || detail; } catch (e) {} throw new Error(detail); }
+  const type = res.headers.get("content-type") || "";
+  return type.includes("json") ? res.json() : res.text();
+}
+
+/* ---------- swarm strip ---------- */
+function drawSwarm(ov) {
+  const svg = $("swarm"), W = 1200, y = 70, left = 60, step = (W - 2 * left) / 11;
+  const x = (n) => left + (n - 1) * step;
+  const agents = ov ? ov.agents : {};
+  let out = `<defs><marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="currentColor"/></marker></defs>`;
+  out += `<line class="chain" x1="${x(1)}" y1="${y}" x2="${x(12)}" y2="${y}"/>`;
+  const base = y + 62;
+  LOOPS.forEach(([from, to, label]) => {
+    const span = Math.abs(from - to), depth = 30 + span * 15, x1 = x(from), x2 = x(to);
+    out += `<path class="loop" style="color:var(--graphite)" marker-end="url(#arrow)" d="M${x1},${base} C${x1},${base + depth} ${x2},${base + depth} ${x2},${base + 1}"/>`;
+    out += `<text class="loop-label" x="${(x1 + x2) / 2}" y="${base + depth * 0.75 - 6}" text-anchor="middle">${esc(label)}</text>`;
+  });
+  AGENTS.forEach(([key, name], i) => {
+    const a = agents[key] || { tasks: 0, tiers: {} };
+    const cls = ["node", a.tasks ? "used" : "", ov && ov.active_agent === key ? "active" : "", a.last_status === "failed" ? "failed" : ""].join(" ");
+    const cx = x(i + 1), parts = name.split(" ");
+    const line1 = parts.length > 2 ? parts.slice(0, 2).join(" ") : parts[0];
+    const line2 = parts.length > 2 ? parts.slice(2).join(" ") : parts.slice(1).join(" ");
+    const total = TIERS.reduce((s, [t]) => s + (a.tiers[t] || 0), 0);
+    let bar = "", bx = cx - 26;
+    TIERS.forEach(([t]) => { const w = total ? 52 * (a.tiers[t] || 0) / total : 0; if (w) { bar += `<rect x="${bx}" y="${y + 33}" width="${w}" height="5" fill="var(--tier-${t})"/>`; bx += w; } });
+    if (!total) bar = `<rect x="${cx - 26}" y="${y + 33}" width="52" height="5" fill="none" stroke="var(--tier-code)" stroke-dasharray="3 2" rx="2"/>`;
+    const title = `${name}: ${a.tasks} task(s)` + (a.last_finding ? `. Last: ${a.last_finding}` : "");
+    out += `<g class="${cls}"><title>${esc(title)}</title>
+      <circle class="pulse" cx="${cx}" cy="${y}" r="24"/>
+      <circle class="ring" cx="${cx}" cy="${y}" r="22"/>
+      <text class="num" x="${cx}" y="${y}">${i + 1}</text>
+      ${bar}
+      <text class="name" x="${cx}" y="${y - 44}">${esc(line1)}</text>
+      <text class="name" x="${cx}" y="${y - 30}">${esc(line2)}</text>
+      <text class="count" x="${cx}" y="${y + 52}">${a.tasks ? a.tasks + (a.tasks === 1 ? " task" : " tasks") : "idle"}</text></g>`;
+  });
+  svg.innerHTML = out;
+  $("agentList").innerHTML = AGENTS.map(([key, name], i) => {
+    const a = agents[key] || { tasks: 0 };
+    return `<li class="${ov && ov.active_agent === key ? "active" : ""}"><b>${i + 1}</b><span>${esc(name)}</span><span class="muted small">${a.tasks || 0}</span></li>`;
+  }).join("");
+}
+
+function drawPhases(phase) {
+  const idx = PHASES.indexOf(phase);
+  $("phases").innerHTML = PHASES.map((p, i) => `<div class="${i < idx ? "past" : i === idx ? "now" : ""}" title="${esc(cap(p))}"></div>`).join("");
+  $("phaseCaption").textContent = phase ? `Phase: ${cap(phase)}` : "";
+}
+
+/* ---------- side panels ---------- */
+function drawSide(ov) {
+  const p = ov.project, usage = p.usage || {}, by = usage.by_tier || {};
+  const totalCalls = TIERS.reduce((s, [t]) => s + (by[t]?.calls || 0), 0);
+  $("spendSummary").textContent = usage.llm_calls
+    ? `${usage.llm_calls} model calls, ${Number(usage.total_tokens || 0).toLocaleString()} tokens, $${Number(usage.cost_usd || 0).toFixed(4)}` + (usage.escalations ? `, ${usage.escalations} escalated to strong` : "")
+    : "No model calls yet.";
+  $("tierBar").innerHTML = TIERS.map(([t]) => totalCalls ? `<span style="width:${100 * (by[t]?.calls || 0) / totalCalls}%;background:var(--tier-${t})" title="${t}"></span>` : "").join("");
+  $("tierLegend").innerHTML = TIERS.map(([t, label]) => {
+    const r = by[t] || {};
+    return `<span class="swatch sw-${t}"></span><span>${label}</span><span class="muted">${r.calls || 0} calls, $${Number(r.cost_usd || 0).toFixed(4)}</span>`;
+  }).join("") + `<span class="swatch sw-code"></span><span>Code</span><span class="muted">no model</span>`;
+
+  const comp = p.completion || {};
+  const checks = comp.checks || [];
+  $("verdict").textContent = !checks.length ? "Not assessed yet." : comp.ready ? "Ready for submission." : `${checks.filter((c) => !c.passed).length} of ${checks.length} checks still failing.`;
+  $("checks").innerHTML = checks.map((c) => `<li><span class="${c.passed ? "ok" : "no"}" aria-label="${c.passed ? "passed" : "failing"}">${c.passed ? "✓" : "✗"}</span><span>${esc(cap(c.name))}</span>${c.detail ? `<span class="detail">${esc(c.detail)}</span>` : ""}</li>`).join("");
+
+  const q = ov.next_actions || [];
+  $("queue").innerHTML = q.length ? q.map((a) => `<li><span class="type">${esc(cap(a.type.toLowerCase()))}</span> ${esc(a.target)}${a.rationale ? `<div class="note">${esc(a.rationale)}</div>` : ""}</li>`).join("")
+    : `<li class="muted">${p.status === "completed" ? "Finished: " + esc(words(p.stop_reason || "")) : "Nothing queued."}</li>`;
+}
+
+function drawHeader(ov) {
+  const p = ov.project, running = ov.running;
+  const st = running ? "running" : p.status;
+  const label = { running: "Running", completed: "Finished", failed: "Failed", paused: "Paused", awaiting_experiments: "Waiting for experiment results", created: "Not started" }[st] || cap(st);
+  $("status").innerHTML = `<span class="dot ${esc(st)}"></span><span>${esc(label)}${p.outcome ? `: ${esc(words(p.outcome))}` : ""}, step ${p.step} of ${ov.max_steps}</span>`;
+  $("title").textContent = p.title;
+  const c = ov.counts, e = ov.evidence || {};
+  $("stores").innerHTML = `<span>Research state <b>${c.papers}</b> papers, <b>${c.hypotheses}</b> hypotheses</span>
+    <span>Evidence graph <b>${Object.values(e.nodes || {}).reduce((a, b) => a + b, 0)}</b> nodes, <b>${e.edges || 0}</b> edges</span>
+    <span>Experiment registry <b>${c.experiments}</b> designs, <b>${c.runs}</b> runs</span>`;
+  $("runBtn").disabled = running || p.status === "completed";
+  $("runBtn").textContent = p.status === "created" ? "Run" : "Resume";
+  $("cancelBtn").disabled = !running;
+  if (p.error) $("phaseCaption").textContent += `. Error: ${p.error}`;
+}
+
+/* ---------- tabs ---------- */
+function drawTabs() {
+  $("tabs").innerHTML = TABS.map(([k, label]) => `<button role="tab" aria-selected="${S.tab === k}" data-tab="${k}">${label}</button>`).join("");
+}
+$("tabs").addEventListener("click", (ev) => {
+  const k = ev.target.dataset.tab; if (!k) return;
+  S.tab = k; try { localStorage.setItem("swarm-tab", k); } catch (e) {}
+  drawTabs(); loadTab();
+});
+
+const section = (name) => api(`/api/v1/projects/${encodeURIComponent(S.id)}/state/${name}`).then((r) => r.data);
+
+const RENDER = {
+  async claims() {
+    const [claims, ev] = await Promise.all([section("claims"), api(`/api/v1/projects/${encodeURIComponent(S.id)}/evidence`)]);
+    let html = "";
+    const q = ev.queries || {};
+    if (claims && claims.claims && claims.claims.length) {
+      html += `<div class="pane"><h2>Claim-evidence map</h2><div class="wrap-table"><table class="data"><thead><tr><th>Claim</th><th>Kind</th><th>Evidence state</th><th>Traceability</th></tr></thead><tbody>` +
+        claims.claims.map((c) => `<tr><td class="statement">${esc(c.text)}<div class="note">${esc(c.id)}, ${esc(c.importance)}</div></td><td>${esc(cap(c.kind))}</td><td>${chip(c.state)}<div class="note">${esc(c.evidence_note)}</div></td><td class="ids">${esc([...c.hypothesis_ids, ...c.run_ids, ...c.paper_ids].join(", ") || "none")}</td></tr>`).join("") +
+        `</tbody></table></div></div>`;
+    } else {
+      html += `<p class="empty">No manuscript claims yet. The Paper Architect maps claims to evidence once experiments have results.</p>`;
+    }
+    const hot = q.hotspots || [];
+    html += `<div class="pane"><h2>Where uncertainty is highest</h2>` + (hot.length ? `<table class="data"><thead><tr><th>Hypothesis claim</th><th>State</th><th>Uncertainty</th><th>Pending experiments</th></tr></thead><tbody>` +
+      hot.map((h) => `<tr><td class="statement">${esc(h.label)}<div class="note">${esc(h.claim)}</div></td><td>${chip(h.state)}</td><td>${fmt(h.uncertainty, 2)}</td><td class="ids">${esc((h.pending_experiments || []).join(", ") || "none")}</td></tr>`).join("") + `</tbody></table>` : `<p class="muted">No hypotheses yet.</p>`) + `</div>`;
+    const lists = [["Resting on a single source", q["single-support"], (x) => `${x.claim}: ${x.label} (from ${x.source})`],
+      ["Contradicted or contested", q.contradicted, (x) => `${x.claim}: ${x.label}`],
+      ["Untested hypotheses", q.untested, (x) => `${x.hypothesis}: ${words(x.reason)}`],
+      ["Paper statements without support", q["unsupported-statements"], (x) => `${x.statement}: ${x.claims.join(", ")}`]];
+    html += `<div class="pane"><h2>Evidence graph checks</h2><div class="facts">` + lists.map(([title, rows, f]) =>
+      `<div><h3>${title}</h3>${rows && rows.length ? `<ul>${rows.slice(0, 8).map((r) => `<li>${esc(f(r))}</li>`).join("")}</ul>` : `<p class="small muted">None.</p>`}</div>`).join("") + `</div></div>`;
+    return html;
+  },
+
+  async research() {
+    const [hyps, exps, analysis] = await Promise.all([section("hypotheses"), section("experiments"), section("analysis")]);
+    let html = `<div class="pane"><h2>Hypotheses</h2>`;
+    html += hyps && hyps.length ? `<div class="wrap-table"><table class="data"><thead><tr><th>Statement</th><th>Version</th><th>Status</th><th>Evidence</th></tr></thead><tbody>` +
+      hyps.map((h) => `<tr class="${h.status === "superseded" ? "superseded" : ""}"><td class="statement">${esc(h.statement)}<div class="note">Falsified if: ${esc(h.falsification_criteria || "not stated")}</div>${h.revision_reason ? `<div class="note">Revised from ${esc(h.revision_of)}: ${esc(h.revision_reason)}</div>` : ""}</td><td>${esc(h.id)} v${h.version}</td><td>${esc(cap(h.status))}</td><td>${chip(h.evidence_state)}</td></tr>`).join("") + `</tbody></table></div>`
+      : `<p class="muted">No hypotheses yet.</p>`;
+    html += `</div>`;
+    const specs = exps ? exps.specs : [];
+    html += `<div class="pane"><h2>Experiment designs</h2>` + (specs.length ? `<div class="wrap-table"><table class="data"><thead><tr><th>Design</th><th>Kind</th><th>Arms</th><th>Status</th></tr></thead><tbody>` +
+      specs.map((s) => `<tr class="${s.status === "superseded" ? "superseded" : ""}"><td>${esc(s.id)} v${s.version} for ${esc(s.hypothesis_id)}<div class="note">${esc(s.objective)}</div>${s.change_log.length > 1 ? `<div class="note">${esc(s.change_log[s.change_log.length - 1])}</div>` : ""}</td><td>${esc(cap(s.kind))}</td><td class="ids">${esc([s.method, ...s.baselines].join(", "))}</td><td>${esc(cap(s.status))}</td></tr>`).join("") + `</tbody></table></div>` : `<p class="muted">No designs yet.</p>`) + `</div>`;
+    const runs = exps ? exps.runs : [];
+    const quant = Object.fromEntries((analysis?.quantitative || []).map((q) => [q.run_id, q]));
+    const interp = Object.fromEntries((analysis?.interpretations || []).map((i) => [i.run_id, i]));
+    html += `<div class="pane"><h2>Runs</h2>` + (runs.length ? `<div class="wrap-table"><table class="data"><thead><tr><th>Run</th><th>Status</th><th>Primary result</th><th>Verdict</th></tr></thead><tbody>` +
+      runs.map((r) => {
+        const prim = (quant[r.id]?.comparisons || []).filter((c) => c.primary);
+        const res = prim.map((c) => `${esc(c.method)} vs ${esc(c.baseline)}: ${c.diff >= 0 ? "+" : ""}${fmt(c.diff)} (p ${fmt(c.p_adjusted)}, g ${fmt(c.hedges_g, 2)})`).join("<br>") || "<span class='muted'>no analysis</span>";
+        const i = interp[r.id];
+        return `<tr><td>${esc(r.id)}<div class="note">${esc(r.experiment_id)} v${r.spec_version}, seeds ${esc(r.seeds.join(", "))}</div></td><td>${esc(cap(r.status))}${r.synthetic ? `<div class="note">synthetic, not evidence</div>` : ""}${r.status === "awaiting_execution" ? `<div class="note">Run it, then: research-pilot experiments ingest ${esc(S.id)} ${esc(r.id)} results.jsonl</div>` : ""}</td><td class="small">${res}</td><td>${i ? esc(cap(i.verdict)) + (i.adjustments.length ? `<div class="note">${esc(i.adjustments[0])}</div>` : "") : ""}</td></tr>`;
+      }).join("") + `</tbody></table></div>` : `<p class="muted">No runs yet.</p>`) + `</div>`;
+    return html;
+  },
+
+  async literature() {
+    const [field, gaps, papers, novelty] = await Promise.all([section("field"), section("gaps"), section("papers"), section("novelty")]);
+    let html = "";
+    if (field) {
+      const groups = [["Subdomains", field.subdomains], ["Major problems", field.major_problems], ["Common methods", field.common_methods], ["Datasets and benchmarks", [...field.datasets, ...field.benchmarks]], ["Emerging directions", field.emerging_directions], ["Open questions", field.open_questions], ["Key research groups", field.key_research_groups], ["Venues", field.venues]];
+      html += `<div class="pane"><h2>Field map</h2><div class="facts">` + groups.map(([t, items]) => `<div><h3>${t}</h3>${items && items.length ? `<ul>${items.slice(0, 6).map((x) => `<li>${esc(x)}</li>`).join("")}</ul>` : `<p class="small muted">None found.</p>`}</div>`).join("") + `</div><p class="note">${esc(field.provenance)}</p></div>`;
+    }
+    const last = novelty && novelty.length ? novelty[novelty.length - 1] : null;
+    if (last) {
+      html += `<div class="pane"><h2>Novelty of proposal v${last.proposal_version}</h2><p class="serif" style="font-size:17px;margin:0 0 6px">${esc(cap(last.verdict))}, ${esc(last.novelty_strength)} novelty (confidence ${fmt(last.confidence, 2)})</p><p class="serif">${esc(last.differentiation)}</p>${(last.warnings || []).map((w) => `<p class="warn">${esc(w)}</p>`).join("")}<p class="note">Searched ${last.search_record?.papers_checked ?? "?"} papers via ${esc((last.search_record?.providers || []).join(", "))}.</p></div>`;
+    }
+    const g = gaps?.gaps || [];
+    html += `<div class="pane"><h2>Research gaps</h2>` + (g.length ? `<table class="data"><thead><tr><th>Gap</th><th>Category</th><th>Novelty</th><th>Evidence</th></tr></thead><tbody>` +
+      g.map((x) => `<tr><td class="statement">${esc(x.description)}<div class="note">${esc(x.id)}. ${esc(x.why_unsolved)}</div></td><td>${esc(cap(x.category))}</td><td>${esc(x.novelty_strength)}</td><td class="ids">${esc(x.supporting_papers.join(", ") || "none")}</td></tr>`).join("") + `</tbody></table>` : `<p class="muted">No gaps identified yet.</p>`) + `</div>`;
+    const ps = (papers || []).slice().sort((a, b) => b.relevance_score - a.relevance_score);
+    if (ps.some((p) => p.synthetic)) html += `<p class="warn">This project uses synthetic mock papers. They exercise the pipeline and are not real literature.</p>`;
+    html += `<div class="pane"><h2>Literature base (${ps.length} papers)</h2>` + (ps.length ? `<div class="wrap-table"><table class="data"><thead><tr><th>Paper</th><th>Year</th><th>Cluster</th><th>Evidence quality</th><th>Relevance</th></tr></thead><tbody>` +
+      ps.map((p) => `<tr><td>${p.url && !p.url.startsWith("mock") ? `<a href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.title)}</a>` : esc(p.title)}<div class="note">${esc(p.id)}, ${esc((p.authors || []).slice(0, 3).join(", "))}${p.text_basis ? `, read from ${esc(p.text_basis)}` : ""}</div></td><td>${esc(p.year ?? "")}</td><td class="small">${esc(p.cluster)}</td><td>${esc(p.evidence_quality)}</td><td>${fmt(p.relevance_score, 2)}</td></tr>`).join("") + `</tbody></table></div>` : `<p class="muted">No papers yet.</p>`) + `</div>`;
+    return html;
+  },
+
+  async decisions() {
+    const items = (await section("decisions")) || [];
+    if (!items.length) return `<p class="empty">No decisions yet. Every gate, plan, revision and stop is recorded here with its reasons and the alternatives considered.</p>`;
+    return `<div class="pane"><ol class="timeline">` + items.slice().reverse().map((d) => `<li><div><div class="kind">${esc(cap(d.kind))}</div><div class="when">${esc(d.id)}, ${esc(new Date(d.timestamp).toLocaleString())}</div></div>
+      <div><div class="what">${esc(d.decision)}</div>${d.reason ? `<div class="note">${esc(d.reason)}</div>` : ""}${d.alternatives_considered.length ? `<div class="note">Alternatives: ${esc(d.alternatives_considered.join("; "))}</div>` : ""}${d.evidence.length ? `<div class="note">Evidence: ${esc(d.evidence.join(", "))}</div>` : ""}</div></li>`).join("") + `</ol></div>`;
+  },
+
+  async review() {
+    const [reviews, critiques] = await Promise.all([section("reviews"), section("critique")]);
+    let html = "";
+    (reviews || []).slice().reverse().forEach((r) => {
+      html += `<div class="pane"><h2>Red-team review, round ${r.round}: ${esc(words(r.recommendation))}</h2><p class="serif">${esc(r.summary)}</p>` +
+        (r.issues.length ? `<table class="data"><thead><tr><th>Issue</th><th>Severity</th><th>Needs</th><th>Status</th></tr></thead><tbody>` +
+          r.issues.map((i) => `<tr><td class="statement">${esc(i.description)}<div class="note">${esc(i.id)}, ${esc(i.dimension)}. ${esc(i.suggestion)}</div></td><td><span class="chip sev-${esc(i.severity)}">${esc(i.severity)}</span></td><td>${esc(i.required_action)}</td><td>${esc(cap(i.status))}</td></tr>`).join("") + `</tbody></table>` : "") + `</div>`;
+    });
+    (critiques || []).slice().reverse().forEach((a) => {
+      html += `<div class="pane"><h2>Critique of ${esc(a.target)}: ${esc(a.verdict)}</h2>${a.summary ? `<p class="serif">${esc(a.summary)}</p>` : ""}` +
+        (a.issues.length ? `<table class="data"><thead><tr><th>Criticism</th><th>Severity</th><th>Proposed test</th><th>Status</th></tr></thead><tbody>` +
+          a.issues.map((i) => `<tr><td class="statement">${esc(i.description)}<div class="note">${esc(i.id)}, ${esc(words(i.category))}${i.target_id ? `, on ${esc(i.target_id)}` : ""}</div></td><td><span class="chip sev-${esc(i.severity)}">${esc(i.severity)}</span></td><td class="small">${esc(i.proposed_test)}</td><td>${esc(cap(i.status))}</td></tr>`).join("") + `</tbody></table>` : "") + `</div>`;
+    });
+    return html || `<p class="empty">No critiques yet. The Proposal Critic and the Red-Team Reviewer report here.</p>`;
+  },
+
+  async manuscript() {
+    if (!S.overview?.has_manuscript) return `<p class="empty">No manuscript yet. The Paper Architect drafts one when the planner judges the evidence sufficient, or when the step budget is nearly spent.</p>`;
+    const htmlDoc = await api(`/api/v1/projects/${encodeURIComponent(S.id)}/manuscript?format=html`);
+    setTimeout(() => { const f = document.querySelector("iframe.manuscript"); if (f) f.srcdoc = htmlDoc; }, 0);
+    return `<div class="pane" style="max-width:none"><p class="small"><a href="/api/v1/projects/${encodeURIComponent(S.id)}/manuscript" download="manuscript.md">Download markdown</a></p><iframe class="manuscript" title="Manuscript" sandbox=""></iframe></div>`;
+  },
+
+  async activity() {
+    const res = await api(`/api/v1/projects/${encodeURIComponent(S.id)}/activity?limit=80`);
+    const rows = res.events.filter((e) => e.event === "task").reverse();
+    if (!rows.length) return `<p class="empty">No agent tasks yet.</p>`;
+    return `<div class="pane"><div class="wrap-table"><table class="data"><thead><tr><th>Task</th><th>Agent</th><th>Model calls</th><th>Findings</th></tr></thead><tbody>` +
+      rows.map((e) => {
+        const r = e.result, t = e.task;
+        const calls = (r.llm_calls || []).map((c) => `${esc(c.task)}: <b>${esc(c.tier)}</b>${c.reasoning_effort ? ` (${esc(c.reasoning_effort)})` : ""}${c.escalated ? ", escalated" : ""}`).join("<br>") || "<span class='muted'>code only</span>";
+        return `<tr><td>${esc(t.task_id)} ${esc(cap(t.type.toLowerCase()))}<div class="note">${r.duration_s}s, ${esc(r.status)}</div></td><td>${esc(AGENTS.find(([k]) => k === r.agent)?.[1] || r.agent)}</td><td class="small">${calls}</td><td class="small">${(r.findings || []).map(esc).join("<br>")}${(r.violations || []).length ? `<div class="note">Guard: ${esc(r.violations.join("; "))}</div>` : ""}${r.error ? `<div class="error">${esc(r.error)}</div>` : ""}</td></tr>`;
+      }).join("") + `</tbody></table></div></div>`;
+  },
+};
+
+async function loadTab() {
+  if (!S.id) return;
+  const body = $("tabBody");
+  try { body.innerHTML = await RENDER[S.tab](); }
+  catch (err) { body.innerHTML = `<p class="error">Could not load this view: ${esc(err.message)}</p>`; }
+}
+
+/* ---------- data flow ---------- */
+async function loadProjects(selectId) {
+  const res = await api("/api/v1/projects");
+  S.projects = res.projects;
+  const sel = $("projectSelect");
+  sel.innerHTML = S.projects.length ? S.projects.map((p) => `<option value="${esc(p.id)}">${esc(p.title)}</option>`).join("") : `<option value="">No projects yet</option>`;
+  const wanted = selectId || location.hash.slice(1) || S.id || (S.projects[0] && S.projects[0].id) || "";
+  if (wanted) { sel.value = wanted; await selectProject(wanted); }
+  else { $("newProject").open = true; drawSwarm(null); drawPhases(""); }
+}
+
+async function selectProject(id) {
+  S.id = id; S.lastStep = -1; history.replaceState(null, "", "#" + id);
+  await refresh(true);
+}
+
+async function refresh(force) {
+  if (!S.id) return;
+  let ov;
+  try { ov = await api(`/api/v1/projects/${encodeURIComponent(S.id)}`); } catch (err) { $("phaseCaption").textContent = err.message; return; }
+  S.overview = ov;
+  drawHeader(ov); drawSwarm(ov); drawPhases(ov.project.phase); drawSide(ov);
+  if (force || ov.project.step !== S.lastStep) { S.lastStep = ov.project.step; await loadTab(); }
+  clearTimeout(S.timer);
+  S.timer = setTimeout(() => refresh(false), ov.running ? 2000 : 10000);
+}
+
+$("projectSelect").addEventListener("change", (ev) => selectProject(ev.target.value));
+$("runBtn").addEventListener("click", async () => {
+  $("runBtn").disabled = true;
+  try { await api(`/api/v1/projects/${encodeURIComponent(S.id)}/run`, { method: "POST", body: "{}" }); } catch (err) { alertInline(err.message); }
+  refresh(true);
+});
+$("cancelBtn").addEventListener("click", async () => {
+  await api(`/api/v1/projects/${encodeURIComponent(S.id)}/cancel`, { method: "POST" });
+  refresh(true);
+});
+function alertInline(msg) { $("phaseCaption").textContent = msg; }
+
+$("newForm").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const f = new FormData(ev.target), list = (v) => String(v || "").split(",").map((s) => s.trim()).filter(Boolean);
+  $("formError").textContent = "";
+  try {
+    const res = await api("/api/v1/projects", { method: "POST", body: JSON.stringify({ topic: f.get("topic"), question: f.get("question"), proposal: f.get("proposal"), seed_papers: list(f.get("seeds")), constraints: list(f.get("constraints")), autorun: true }) });
+    ev.target.reset(); $("newProject").open = false;
+    await loadProjects(res.project_id);
+  } catch (err) { $("formError").textContent = `Could not create the project: ${err.message}`; }
+});
+
+drawTabs();
+drawSwarm(null);
+loadProjects().catch((err) => { $("tabBody").innerHTML = `<p class="error">Could not reach the API: ${esc(err.message)}</p>`; });
+</script>
+</body>
+</html>

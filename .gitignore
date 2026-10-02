@@ -7,8 +7,21 @@ __pycache__/
 *.pyd
 *.db
 
-reports/*
-!reports/.gitkeep
+# Research project workspaces (generated state, logs, manuscripts)
+projects/
+ci_projects/
+reports/
+
+build/
+dist/
+.ruff_cache/
 
 src/*.egg-info/
-src/research_assistant.egg-info/
+src/research_pilot.egg-info/
+
+# Local-only planning and agent notes
+CLAUDE.md
+tasks.md
+*srs*
+*SRS*
+desktop.ini

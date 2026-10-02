@@ -3,13 +3,13 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "research-assistant"
-version = "0.1.0"
-description = "Research assistant with multi-step reasoning workflow"
+name = "research-pilot"
+version = "0.2.0"
+description = "Research agent swarm: a closed-loop research system with difficulty-based model routing"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = [
-  "langgraph>=0.2.0",
+  "anthropic>=1.0",
   "typer>=0.12.0",
   "fastapi>=0.115.0",
   "uvicorn>=0.30.0",
@@ -17,15 +17,18 @@ dependencies = [
   "requests>=2.31.0",
   "beautifulsoup4>=4.12.0",
   "pypdf>=5.0.0",
+  "pyyaml>=6.0",
+  "pydantic>=2.6",
 ]
 
 [project.optional-dependencies]
 dev = [
   "pytest>=8.0.0",
+  "httpx>=0.27",
 ]
 
 [project.scripts]
-research-assistant = "research_assistant.main:main"
+research-pilot = "research_pilot.cli:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
@@ -34,7 +37,7 @@ package-dir = {"" = "src"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-research_assistant = ["web/*.html"]
+research_pilot = ["web/*.html"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

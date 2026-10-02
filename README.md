@@ -1,348 +1,188 @@
-# Research Assistant
+# Research Pilot
 
-Production-style, multi-provider research workflow built with LangGraph, FastAPI, and Typer CLI.
+Research Pilot takes a research idea to a tested, evidence-mapped manuscript. Twelve specialised agents work on one shared research state (literature base, evidence graph, hypothesis and experiment registries, decision log, adaptive roadmap) under a control-plane orchestrator. The loop does not stop at the first draft: results feed back into planning, and a red-team reviewer's objections send the work back for more literature, new experiments, revised hypotheses or a pivot.
 
-It plans a query, decomposes it, searches sources, analyzes evidence, synthesizes sections, enforces quality gates, and exports reports (`md`, `html`, `txt`, `pdf`) with benchmark + dashboard tooling.
+Model calls are **routed by task difficulty, not by agent**. Searching, extraction and summaries run on a lite model at low reasoning effort; novelty judgments, critique, hypothesis and experiment design, interpretation, planning and review run on a strong model at high effort; experiment code goes to a coding tier; deduplication, citation graphs, statistics and citation formatting are plain code.
 
-## Demo Walkthrough
+![Research Pilot architecture: twelve agents, the orchestrator, the shared research state, the evidence graph and the experiment registry](resources/architecture.png)
 
-Full end-to-end dashboard demo (query -> live progress -> report -> PDF export):
+## How a project runs
 
-[![Watch the demo](https://img.youtube.com/vi/_H1j-SqfwVA/hqdefault.jpg)](https://youtu.be/_H1j-SqfwVA)
+1. **Field map.** The Field Scout maps subfields, methods, datasets, metrics and open questions.
+2. **Literature.** Literature Intelligence searches OpenAlex and arXiv (Semantic Scholar optional), follows citation chains, extracts every paper and clusters methods. The Gap & Novelty Analyst finds gaps and can ask for another round.
+3. **Proposal validation.** Novelty is judged against the searched corpus, the Proposal Critic attacks the idea, and the planner revises, pivots or kills it.
+4. **Hypotheses.** Explicit, falsifiable hypotheses, critiqued and refined before any experiment runs.
+5. **Experiment design.** The smallest experiments that could falsify each hypothesis, critiqued, revised as new versions, then frozen.
+6. **Research loop.** Run, quantify, interpret, re-plan. The planner ranks candidate actions by `scientific value x uncertainty reduction x feasibility / cost` and can search more literature, replicate, ablate, test robustness, investigate a failure, revise a hypothesis or the proposal, write, request review, stop or kill.
+7. **Paper.** The Paper Architect maps every claim to evidence and drafts the manuscript. Unresolved red-team issues go back to the planner until the completion checks pass or the review budget runs out.
 
-[Watch on YouTube](https://youtu.be/_H1j-SqfwVA)
+## Routing by difficulty
 
-## Highlights
+Every model call is a registered task kind with a difficulty and a capability. The router derives the tier from both and the reasoning effort from the difficulty; agents never pick models. `research-pilot routing` prints the table for your configuration.
 
-- Multi-step graph workflow (`analyze -> plan -> gather -> analyze -> synthesize -> report`)
-- Pluggable LLM providers: `openai`, `openrouter`, `groq`, `xai/grok`, `ollama`, `mock`
-- LLM routing by node/task (`planning`, `analysis`, `writing`)
-- Retry + provider/model fallback chains
-- Search providers: `tavily`, `serpapi`, `mock`
-- Async sessions with persistent SQLite store
-- API auth + simple rate limiting
-- Quality gates:
-  - minimum reference count
-  - minimum unique source domains
-  - optional hard enforcement
-- Adaptive depth reruns when quality fails and budget allows
-- Benchmark runner + history + compare
-- Dashboard with stage timeline, live status, report browsing, and export helpers
-- CI pipeline with secret scan + test run + benchmark smoke run
+| Work | Difficulty | Tier | Default model | Effort |
+|---|---|---|---|---|
+| Search queries, field map, paper extraction and summaries, clustering, rewriting | Low to low-medium | Lite | Claude Haiku 4.5 | low |
+| Claim verification against full text | Medium | Lite | Claude Haiku 4.5 | medium |
+| Gap discovery, interpretation, planning, claim-evidence mapping | High | Strong | Claude Opus 5.5 | high |
+| Novelty, proposal and design critique, hypothesis and experiment design, review | Very high | Strong | Claude Opus 5.5 | high |
+| Paper drafting | Medium-high | Strong | Claude Opus 5.5 | medium |
+| Experiment implementation and repair | Medium-high | Coding | Claude Opus 5.5 | medium |
+| Deduplication, citation graph, data processing, statistics, citation formatting | Low | Code | none | none |
 
-## System Architecture
+- Tasks at or above `LLM_STRONG_MIN_DIFFICULTY` (default `medium_high`) use the strong tier. Coding tasks use the coding tier, which falls back to the strong model.
+- If a lite-tier answer cannot be parsed or validated, the call is retried once on the strong tier. Escalations are counted.
+- `LLM_TASK_OVERRIDES` moves single tasks between tiers, for example `paper.drafting=lite`.
+- Tokens and cost are tracked per tier and per task (`research-pilot metrics`). Claude prices are built in, so cost budgets work.
 
-```mermaid
-flowchart TD
-  subgraph UX[Interfaces]
-    CLI[Typer CLI]
-    API[FastAPI Endpoints]
-    DASH[Web Dashboard]
-  end
+On Claude Opus 5.5 and Sonnet 5.5 the effort maps to `output_config.effort` with adaptive thinking, and server-side refusal fallbacks (`fallbacks: "default"`) are enabled so a declined request is retried on Anthropic's recommended model. On Claude Haiku 4.5, low effort runs without thinking and medium or high effort uses a thinking budget.
 
-  subgraph ORCH[Orchestration Layer]
-    RA[ResearchAssistant]
-    WF[LangGraph Workflow]
-    EDGE[Conditional Edges]
-  end
+## What the code guarantees
 
-  subgraph GRAPH[Research Graph Nodes]
-    N1[Analyze Query]
-    N2[Plan Research]
-    N3[Gather Information]
-    N4[Analyze Content]
-    N5[Synthesize Information]
-    N6[Generate Report]
-  end
+The safety rules are enforced in code rather than left to prompts.
 
-  subgraph SERVICES[Core Services]
-    LLM[LLM Service]
-    SEARCH[Search Service]
-    PARSER[Document Parser]
-    CITE[Citation Manager]
-    FMT[Report Formatter]
-  end
+- **No fabricated evidence.** Papers enter the literature base only from a literature provider with a traceable identifier. References to unknown papers, gaps, hypotheses, experiments or runs are stripped and logged as violations. Ids, provenance and evidence states are owned by code and never requested from a model.
+- **Claims earn their state.** `SUPPORTED`, `PARTIALLY_SUPPORTED`, `HYPOTHESIS`, `SPECULATION`, `CONTRADICTED` and `UNKNOWN` are derived from the evidence graph. A contribution needs experimental support; one result gives partial support and two give support. Statements tagged evidence-backed without valid evidence ids are downgraded to inference.
+- **Statistics are code.** Welch's t-test, confidence intervals, Hedges' g and Holm correction are computed in Python and checked against SciPy. The interpreter cannot call a hypothesis supported unless every primary comparison is significant in the expected direction after correction. The analysis flags too few seeds, unstable seeds, best-seed dependence, implausibly large effects, perfect scores and multiple-comparison effects.
+- **No silent protocol changes.** Experiment specs are versioned and frozen on approval; any change is a new version with a change log. Code repairs and declared deviations are recorded on the run.
+- **No cherry-picking.** Runs are append-only, failed attempts are kept, results are written once.
+- **No retrospective rewriting.** A revised hypothesis is a new version with its reason, triggering evidence and decision; the original stays on record and its results do not carry over.
+- **Synthetic is never evidence.** Mock papers and simulated or mock-generated results are flagged and ignored by the evidence graph.
+- **Every decision is logged** with its reason, evidence and the alternatives considered.
 
-  subgraph PROVIDERS[External Providers]
-    LLM_P[OpenAI / OpenRouter / Groq / xAI / Ollama / Mock]
-    S_P[Tavily / SerpAPI / Mock]
-  end
+A manuscript is publication-ready only when all eight completion checks pass: manuscript written, central claims supported, claims within their evidence, required experiments complete, reviewer objections addressed, limitations documented, citations verified, results reproducible.
 
-  subgraph DATA[Persistence + Observability]
-    DB[(SQLite Session Store)]
-    MET[LLM + Ops Metrics]
-    BENCH[Benchmark History / Compare]
-  end
-
-  subgraph OUTPUTS[Outputs]
-    MD[Markdown Report]
-    EXP[Export: md / html / txt / pdf]
-  end
-
-  CLI --> RA
-  API --> RA
-  DASH --> API
-  RA --> WF
-  WF --> EDGE
-  EDGE --> N1 --> N2 --> N3 --> N4 --> N5 --> N6
-
-  N2 --> LLM
-  N4 --> LLM
-  N5 --> LLM
-  N6 --> LLM
-  LLM --> LLM_P
-
-  N3 --> SEARCH --> S_P
-  N3 --> PARSER
-  N6 --> CITE
-  N6 --> FMT
-  FMT --> MD --> EXP
-
-  RA --> DB
-  RA --> MET --> BENCH
-
-  classDef ui fill:#e7f5ff,stroke:#1c7ed6,stroke-width:1.5px,color:#0b3558;
-  classDef orch fill:#fff3bf,stroke:#f08c00,stroke-width:1.5px,color:#5c3d00;
-  classDef gnode fill:#e6fcf5,stroke:#099268,stroke-width:1.5px,color:#084c3a;
-  classDef svc fill:#f3f0ff,stroke:#5f3dc4,stroke-width:1.5px,color:#2e1a7a;
-  classDef provider fill:#ffe8cc,stroke:#d9480f,stroke-width:1.5px,color:#5f2b12;
-  classDef data fill:#fff0f6,stroke:#c2255c,stroke-width:1.5px,color:#6a1533;
-  classDef out fill:#f1f3f5,stroke:#495057,stroke-width:1.5px,color:#212529;
-
-  class CLI,API,DASH ui;
-  class RA,WF,EDGE orch;
-  class N1,N2,N3,N4,N5,N6 gnode;
-  class LLM,SEARCH,PARSER,CITE,FMT svc;
-  class LLM_P,S_P provider;
-  class DB,MET,BENCH data;
-  class MD,EXP out;
-```
-
-## Repository Layout
-
-```text
-src/research_assistant/
-  api.py                FastAPI app + dashboard endpoint
-  assistant.py          Orchestrator + async sessions + persistence glue
-  main.py               Typer CLI + report export + benchmark tooling
-  config.py             Env-driven settings
-  storage.py            SQLite session store
-  graph/
-    workflow.py         LangGraph graph construction
-    nodes.py            Node implementations
-    edges.py            Conditional transitions
-    state.py            Typed workflow state
-  services/
-    llm.py              Provider clients, retries, fallbacks, metrics
-    search.py           Tavily/SerpAPI/mock retrieval
-    parser.py           Text/PDF parsing
-    citation.py         Citation indexing/normalization
-    formatter.py        Markdown report generation
-  web/dashboard.html    Browser dashboard UI
-
-tests/
-  unit/                 Service, node, parser, routing, quality tests
-  integration/          CLI, API, benchmark, persistence, e2e routing tests
-```
-
-## Getting Started
-
-### 1) Install
+## Quick start
 
 ```bash
 python -m venv .venv
-. .venv/Scripts/activate
+. .venv/Scripts/activate          # Windows; .venv/bin/activate elsewhere
 pip install -e .[dev]
+cp .env.example .env
 ```
 
-### 2) Configure Environment
-
-Create `.env` in project root:
-
-```env
-# LLM
-LLM_PROVIDER=openrouter
-LLM_MODEL=openai/gpt-oss-120b:free
-OPENROUTER_API_KEY=your_openrouter_key
-
-# Optional per-task model routing
-LLM_MODEL_PLANNING=
-LLM_MODEL_ANALYSIS=
-LLM_MODEL_WRITING=
-
-# Retry/fallback
-LLM_RETRY_MAX_ATTEMPTS=4
-LLM_RETRY_BASE_DELAY_S=1.0
-LLM_RETRY_MAX_DELAY_S=8.0
-LLM_ROUTE_FALLBACK_ENABLED=true
-LLM_FALLBACK_PROVIDER=
-LLM_FALLBACK_MODEL=
-LLM_SECOND_FALLBACK_PROVIDER=
-LLM_SECOND_FALLBACK_MODEL=
-
-# Optional provider credentials
-OPENAI_API_KEY=
-GROQ_API_KEY=
-XAI_API_KEY=
-OLLAMA_BASE_URL=http://127.0.0.1:11434
-
-# Search
-SEARCH_PROVIDER=tavily
-TAVILY_API_KEY=your_tavily_key
-# SEARCH_PROVIDER=serpapi
-# SERPAPI_API_KEY=your_serpapi_key
-
-# Research controls
-MAX_SEARCH_RESULTS=5
-MAX_SUB_QUESTIONS=5
-MAX_RESEARCH_ITERATIONS=5
-MIN_RELEVANCE_SCORE=0.8
-MIN_UNIQUE_SOURCE_DOMAINS=2
-MIN_REFERENCE_COUNT=3
-QUALITY_GATE_ENFORCE=false
-MAX_TOTAL_TOKENS_PER_QUERY=0
-MAX_SECONDS_PER_QUERY=0
-ADAPTIVE_DEPTH_ENABLED=true
-ADAPTIVE_MAX_PASSES=1
-ADAPTIVE_SUB_QUESTIONS_INCREMENT=1
-ADAPTIVE_ITERATIONS_INCREMENT=1
-
-# Storage / API guards
-REPORTS_DIRECTORY=./reports
-SESSION_DB_PATH=./reports/sessions.db
-API_AUTH_TOKEN=
-API_RATE_LIMIT_PER_MINUTE=0
-```
-
-## CLI Usage
-
-### Run a query
+Run the whole loop offline first. The mock provider returns deterministic, clearly marked placeholder output, the literature is synthetic and experiments are simulated:
 
 ```bash
-research-assistant run "Impact of AI on education"
+LLM_PROVIDER=mock LITERATURE_PROVIDERS=mock EXPERIMENT_EXECUTOR=simulated \
+  research-pilot new "retrieval augmented generation under distribution shift" --run
 ```
 
-### Async progress watch
+For a real project, put your key in `.env` (`ANTHROPIC_API_KEY=...`). The defaults use Claude Opus 5.5 for strong and coding work and Claude Haiku 4.5 for lite work. A full run costs about **$3.30** with these defaults (estimated from measured prompt sizes; how long the strong model thinks moves it between roughly $2.50 and $5), so keep a cap such as `MAX_COST_USD=3.80`. At 70% of the cap the orchestrator writes and reviews the manuscript before anything else.
 
 ```bash
-research-assistant watch <session_id>
+research-pilot new "Label smoothing and calibration of small classifiers" \
+  --question "Does label smoothing improve calibration of logistic regression and small MLPs on tabular data?" \
+  --proposal @proposal.md \
+  --seed-paper 1906.02629 \
+  --constraint "CPU only" \
+  --run
 ```
 
-### Metrics
+OpenRouter works as well: set `LLM_PROVIDER=openrouter`, `OPENROUTER_API_KEY` and OpenRouter model ids for the tiers you use.
+
+## Experiments
+
+The Experiment Engineer writes a self-contained `run.py` per approved experiment. Contract: `python run.py --seed N --output-dir DIR`, printing one `RESULT_JSON: {"arm": ..., "seed": ..., "metrics": {...}}` line per arm.
+
+| `EXPERIMENT_EXECUTOR` | Behaviour |
+|---|---|
+| `manual` (default) | The project pauses as `awaiting_experiments`. Review `experiments/runs/R###/run.py`, run it, then `research-pilot experiments ingest <project> R### results.jsonl` and `research-pilot run <project>`. |
+| `subprocess` | Runs generated code locally with a timeout. Not a sandbox: enable it only for code you are willing to run. `research-pilot experiments execute <project> R###` runs a single reviewed run. |
+| `simulated` | Deterministic synthetic numbers for demos and tests, always flagged synthetic. |
+
+Failed runs are repaired by the coding tier up to `EXPERIMENT_MAX_REPAIRS` times; each repair is logged and the failed attempt kept.
+
+## Project state
+
+Each project is a resumable folder in `WORKSPACE_DIR` (default `./projects`), readable as YAML and Markdown:
+
+```text
+projects/<project-id>/
+  project.yaml                 status, phase, budget use, completion checks
+  field/                       field_map.yaml, terminology.yaml
+  literature/                  papers/P###.yaml, clusters/, citations/, literature_map.yaml
+  gaps/research_gaps.yaml
+  proposal/                    proposal.yaml (every version), criticisms.yaml, novelty_analysis.yaml
+  hypotheses/hypotheses.yaml   every version, with revision reasons
+  experiments/                 specs/E#.v#.yaml, runs/R###/, results/, artifacts/
+  analysis/                    quantitative/, interpretations/, errors/
+  decisions/decision_log.yaml
+  roadmap/roadmap.yaml         the orchestrator's action queue
+  paper/                       claims.yaml, tables/, manuscript/manuscript.md, qa.yaml, supplementary/
+  reviews/red_team/            review_##.yaml
+  evidence/evidence_graph.yaml
+  logs/                        activity.jsonl, llm_calls.jsonl, violations.jsonl
+```
+
+## CLI
 
 ```bash
-research-assistant metrics
-research-assistant metrics --json
-research-assistant metrics --reset --yes
+research-pilot new TOPIC [--question] [--proposal TEXT|@file] [--seed-paper ID] [--constraint TEXT] [--run]
+research-pilot run [PROJECT] [--max-steps N]        # run or resume; PROJECT defaults to latest
+research-pilot projects
+research-pilot status [PROJECT] [--json]
+research-pilot show PROJECT SECTION [--json]        # field, papers, literature, gaps, proposal, novelty, critique,
+                                                    # hypotheses, experiments, analysis, decisions, roadmap, claims,
+                                                    # reviews, qa, manuscript, activity, violations
+research-pilot evidence [PROJECT] [--graph]         # single-support, contradicted, untested, unsupported, hotspots
+research-pilot routing [--json]
+research-pilot metrics [PROJECT] [--json]
+research-pilot export [PROJECT] --to md|html|pdf [--output PATH]
+research-pilot experiments list|ingest|execute ...
+research-pilot serve [--host] [--port]
 ```
 
-### Benchmark
+## Dashboard and API
 
-```bash
-research-assistant benchmark --num-queries 3 --json
-research-assistant benchmark --num-queries 3 --pause-seconds 2 --json
-research-assistant benchmark-history --limit 10 --json
-research-assistant benchmark-compare --json
-```
+`research-pilot serve` starts the API and the dashboard at `http://127.0.0.1:8000/dashboard`. The dashboard draws the twelve agents with their feedback loops, highlights the active agent and each agent's tier mix, and shows spend by tier, completion checks, the roadmap, claims and evidence, hypotheses and experiments, literature, decisions, critique and review, the manuscript and the activity log.
 
-### Report Browser and Export
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/api/v1/projects` | Create a project (`topic`, `question`, `proposal`, `seed_papers`, `constraints`, `autorun`, `max_steps`) |
+| GET | `/api/v1/projects` | List projects |
+| GET | `/api/v1/projects/{id}` | Overview: status, counts, agents, next actions, evidence summary |
+| POST | `/api/v1/projects/{id}/run`, `/cancel` | Resume or pause |
+| GET | `/api/v1/projects/{id}/state/{section}` | Any state section (same names as `show`) |
+| GET | `/api/v1/projects/{id}/evidence?graph=true` | Evidence graph queries, optionally the whole graph |
+| GET | `/api/v1/projects/{id}/activity`, `/metrics` | Task log; usage by tier and task |
+| GET | `/api/v1/projects/{id}/manuscript?format=md` or `html` | Manuscript |
+| POST | `/api/v1/projects/{id}/runs/{run_id}/results` | Ingest results of a manually executed run |
+| GET | `/api/v1/routing` | Resolved routing table |
 
-```bash
-research-assistant reports list --json
-research-assistant reports show latest --full
-research-assistant reports show latest --kind session
-research-assistant reports export --from latest --to html --output reports/latest_report.html
-research-assistant reports export --from latest --to pdf --output reports/latest_report.pdf
-research-assistant reports export --from latest --to md --output reports/latest_report.md
-```
+`API_AUTH_TOKEN` turns on an `X-API-Key` check and `API_RATE_LIMIT_PER_MINUTE` a per-client limit.
 
-## API Usage
+## Configuration
 
-Start server:
+Settings come from the environment or `.env`; `.env.example` lists them all.
 
-```bash
-uvicorn research_assistant.api:app --host 127.0.0.1 --port 8000
-```
+| Variable | Default | Meaning |
+|---|---|---|
+| `LLM_PROVIDER`, `LLM_MODEL` | `anthropic`, `claude-opus-5-5` | Default route (`anthropic`, `openrouter`, `mock`) |
+| `LLM_{LITE,STRONG,CODING}_PROVIDER/_MODEL` | empty | Per-tier model; lite defaults to `claude-haiku-4-5` on anthropic |
+| `LLM_{TIER}_REASONING_EFFORT` | `auto` | `auto` follows difficulty; `low`, `medium`, `high` fix it; `none` sends nothing |
+| `LLM_STRONG_MIN_DIFFICULTY` | `medium_high` | Difficulty threshold for the strong tier |
+| `LITERATURE_PROVIDERS` | `openalex,arxiv` | Also `semantic_scholar` (set `SEMANTIC_SCHOLAR_API_KEY`) or `mock` |
+| `LITERATURE_FULLTEXT_TOP_K` | `0` | Read open-access PDFs of the top papers and verify their claims |
+| `EXPERIMENT_EXECUTOR` | `manual` | `manual`, `subprocess` or `simulated` |
+| `MAX_STEPS`, `MAX_EXPERIMENT_RUNS`, `MAX_REVIEW_ROUNDS` | `60`, `8`, `2` | Orchestration budgets |
+| `MAX_COST_USD`, `MAX_TOTAL_TOKENS`, `MAX_SECONDS` | `0` (off) | Hard budgets; the manuscript is written at 70% of a cost or token budget |
 
-### Dashboard Setup
-
-1. Ensure dependencies are installed and `.env` is configured.
-2. Start the API server:
-
-```bash
-uvicorn research_assistant.api:app --host 127.0.0.1 --port 8000
-```
-
-3. Open the dashboard:
-
-- `http://127.0.0.1:8000/dashboard`
-
-4. Run a full flow:
-- Enter query -> click `Start Research`
-- Wait for stage timeline to complete
-- Open latest report (`Rendered`/`Raw` tabs)
-- Export report as HTML/MD/PDF from dashboard or CLI
-
-Dashboard:
-
-- `http://127.0.0.1:8000/dashboard`
-
-API examples:
-
-```bash
-curl -X POST http://127.0.0.1:8000/api/v1/research \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: <token-if-enabled>" \
-  -d "{\"query\":\"Impact of AI on education\"}"
-```
-
-```bash
-curl http://127.0.0.1:8000/api/v1/research/<session_id>/status
-curl http://127.0.0.1:8000/api/v1/research/<session_id>/result
-curl -X POST http://127.0.0.1:8000/api/v1/research/<session_id>/cancel
-curl http://127.0.0.1:8000/api/v1/reports?limit=20
-curl http://127.0.0.1:8000/api/v1/benchmarks/history?limit=10
-```
-
-## Features
-
-- URL deduplication in retrieval
-- Citation normalization + placeholder rejection
-- Citation isolation per run (no cross-session leakage)
-- Source diversity and reference count checks
-- Optional hard quality gate enforcement
-- LLM retries with backoff and capped delay
-- Fallback providers/models when primary fails
-- Budget guardrails:
-  - max tokens/query
-  - max duration/query
-
-## Testing
-
-Run all tests:
+## Development
 
 ```bash
 pytest -q
 ```
 
-Current suite includes:
+The suite covers routing, the Anthropic and OpenRouter providers, parsing, repair, escalation and fallback, statistics against SciPy reference values, the evidence graph, the state safety rules, literature parsing, experiment execution and analysis, planning and export. Integration tests run the full swarm offline (including the publication-ready path, manual pause and resume, recovery from a failed step and the interpreter guard) and exercise the API and CLI. CI runs a secret scan, the tests and an offline end-to-end project on Python 3.10 to 3.12.
 
-- Unit tests for node normalization, parser/pdf handling, routing, retries, usage metrics, citations
-- Integration tests for CLI/API/benchmark/persistence/model-routing/progress behavior
+## Limitations
 
-## CI
+- Manuscript quality depends on the strong model; the mock provider only proves the control flow.
+- Semantic Scholar rate-limits anonymous use and arXiv can be slow; provider failures become warnings and the run continues.
+- The `subprocess` executor is not a sandbox.
+- PDF export is plain text; use the HTML export for formatted output.
 
-GitHub Actions workflow: `.github/workflows/ci.yml`
+## Previous version
 
-CI jobs:
-
-1. Install package (`pip install -e .[dev]`)
-2. Run secret hygiene scan (`python scripts/scan_secrets.py`)
-3. Run tests (`pytest -q`)
-4. Run benchmark smoke (`research-assistant benchmark --num-queries 1 --json --reset-first`)
-
-## Known Constraints
-
-- If using free/shared API models, expect occasional rate limits (`429`)
-- `mock://` links are valid references for local mock mode, but not web-browsable
-- Dashboard export-to-PDF uses browser print flow; CLI supports direct `--to pdf`
+v1 was a linear LangGraph web-search report generator: it decomposed a query into sub-questions, searched the web with Tavily or SerpAPI, synthesised sections and exported a cited report, with quality gates and a benchmark harness. v2 replaces that pipeline with the closed research loop above. The v1 documentation is archived in [resources/README_V1.md](resources/README_V1.md).

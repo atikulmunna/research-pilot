@@ -2,7 +2,7 @@ from io import BytesIO
 
 from pypdf import PdfWriter
 
-from research_assistant.services.parser import DocumentParser
+from research_pilot.services.parser import DocumentParser
 
 
 def _make_pdf_bytes() -> bytes:

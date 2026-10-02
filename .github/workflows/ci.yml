@@ -10,7 +10,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11"]
+        python-version: ["3.10", "3.11", "3.12"]
 
     steps:
       - name: Checkout
@@ -32,18 +32,24 @@ jobs:
       - name: Run tests
         run: pytest -q
 
-      - name: Benchmark smoke run (mock providers)
+      - name: Offline swarm smoke run (mock models, mock literature, simulated experiments)
         env:
           LLM_PROVIDER: mock
-          SEARCH_PROVIDER: mock
-          REPORTS_DIRECTORY: ./reports_ci
-          SESSION_DB_PATH: ./reports_ci/sessions.db
+          LLM_MODEL: mock
+          LITERATURE_PROVIDERS: mock
+          EXPERIMENT_EXECUTOR: simulated
+          WORKSPACE_DIR: ./ci_projects
         run: |
-          research-assistant benchmark --num-queries 1 --json --reset-first > benchmark_smoke.json
+          research-pilot routing
+          research-pilot new "retrieval augmented generation under distribution shift" --run --quiet
+          research-pilot status latest --json > status.json
+          research-pilot export latest --to html --output ci_projects/manuscript.html
           python - <<'PY'
           import json
-          payload = json.load(open("benchmark_smoke.json", "r", encoding="utf-8"))
-          summary = payload.get("summary", {})
-          assert summary.get("queries_run") == 1, summary
-          print("Benchmark smoke passed.")
+          status = json.load(open("status.json", encoding="utf-8"))
+          project = status["project"]
+          assert project["status"] == "completed", project
+          assert all(agent["tasks"] > 0 for agent in status["agents"].values()), status["agents"]
+          assert {"lite", "strong", "coding"} <= set(project["usage"]["by_tier"]), project["usage"]
+          print("Swarm smoke run passed:", project["outcome"])
           PY
