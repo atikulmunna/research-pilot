@@ -3,13 +3,17 @@
 import html
 import re
 from pathlib import Path
-from typing import List
+from typing import Callable, Dict, Iterator, List, Tuple
 
 _LINK = re.compile(r"\[([^\]]+)\]\(([A-Za-z][A-Za-z0-9+.-]*://[^)\s]+)\)")
 _URL = re.compile(r"([A-Za-z][A-Za-z0-9+.-]*://[^\s<]+)")
 _BOLD = re.compile(r"\*\*([^*]+)\*\*")
 _ITALIC = re.compile(r"(?<![*\w])\*([^*\n]+)\*(?![*\w])")
 _CODE = re.compile(r"`([^`]+)`")
+_HEADING = re.compile(r"^(#{1,6})\s+(.*)$")
+_UNORDERED = re.compile(r"^\s*[-*+]\s+(.*)$")
+_ORDERED = re.compile(r"^\s*\d+\.\s+(.*)$")
+_CITATION_LINE = re.compile(r"^\[(\d+|P\d+)\]\s+")
 
 
 def markdown_to_html(markdown: str, title: str) -> str:
@@ -33,97 +37,109 @@ def markdown_to_html(markdown: str, title: str) -> str:
 
 
 def render_markdown_body(markdown: str) -> str:
-    lines = markdown.splitlines()
-    chunks: List[str] = []
-    paragraph: List[str] = []
-    list_kind = ""
-    items: List[str] = []
-    code: List[str] = []
-    table: List[str] = []
-    in_code = False
+    chunks = [_RENDERERS.get(kind, _render_nothing)(lines) for kind, lines in _blocks(markdown.splitlines())]
+    return "".join(chunks) or "<p></p>"
 
-    def flush_paragraph() -> None:
-        if paragraph:
-            chunks.append(f"<p>{format_inline(' '.join(paragraph).strip())}</p>")
-            paragraph.clear()
 
-    def flush_list() -> None:
-        nonlocal list_kind
-        if items:
-            chunks.append(f"<{list_kind}>" + "".join(f"<li>{i}</li>" for i in items) + f"</{list_kind}>")
-            items.clear()
-        list_kind = ""
+def _line_kind(line: str) -> str:
+    stripped = line.strip()
+    if stripped.startswith("```"):
+        return "fence"
+    if stripped.startswith("|") and stripped.endswith("|"):
+        return "table"
+    if not stripped:
+        return "blank"
+    if _HEADING.match(stripped):
+        return "heading"
+    if _UNORDERED.match(line):
+        return "ul"
+    if _ORDERED.match(line):
+        return "ol"
+    if stripped.startswith(">"):
+        return "quote"
+    if _CITATION_LINE.match(stripped):
+        return "citation"
+    return "paragraph"
 
-    def flush_table() -> None:
-        if not table:
-            return
-        rows = [[cell.strip() for cell in row.strip().strip("|").split("|")] for row in table]
-        rows = [r for r in rows if not all(re.fullmatch(r":?-{2,}:?", c or "--") for c in r)]
-        if rows:
-            head = "".join(f"<th>{format_inline(c)}</th>" for c in rows[0])
-            body = "".join("<tr>" + "".join(f"<td>{format_inline(c)}</td>" for c in r) + "</tr>" for r in rows[1:])
-            chunks.append(f"<table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>")
-        table.clear()
 
-    def flush_all() -> None:
-        flush_paragraph()
-        flush_list()
-        flush_table()
-
+def _blocks(lines: List[str]) -> Iterator[Tuple[str, List[str]]]:
+    """Group lines into (kind, lines) blocks; consecutive lines of a grouping kind share a block."""
+    kind, block = "", []
     for raw in lines:
         line = raw.rstrip()
-        stripped = line.strip()
-        if stripped.startswith("```"):
-            flush_all()
-            if in_code:
-                chunks.append(f"<pre><code>{html.escape(chr(10).join(code))}</code></pre>")
-                code.clear()
-            in_code = not in_code
+        line_kind = _line_kind(line)
+        if kind == "code":
+            if line_kind == "fence":
+                yield "code", block
+                kind, block = "", []
+            else:
+                block.append(line)
             continue
-        if in_code:
-            code.append(line)
-            continue
-        if stripped.startswith("|") and stripped.endswith("|"):
-            flush_paragraph()
-            flush_list()
-            table.append(stripped)
-            continue
-        flush_table()
-        if not stripped:
-            flush_paragraph()
-            flush_list()
-            continue
-        heading = re.match(r"^(#{1,6})\s+(.*)$", stripped)
-        if heading:
-            flush_all()
-            level = len(heading.group(1))
-            chunks.append(f"<h{level}>{format_inline(heading.group(2).strip())}</h{level}>")
-            continue
-        unordered = re.match(r"^\s*[-*+]\s+(.*)$", line)
-        ordered = re.match(r"^\s*\d+\.\s+(.*)$", line)
-        if unordered or ordered:
-            flush_paragraph()
-            kind = "ol" if ordered else "ul"
-            if list_kind and list_kind != kind:
-                flush_list()
-            list_kind = kind
-            items.append(format_inline((ordered or unordered).group(1).strip()))
-            continue
-        flush_list()
-        if stripped.startswith(">"):
-            flush_paragraph()
-            chunks.append(f"<blockquote>{format_inline(stripped[1:].strip())}</blockquote>")
-            continue
-        if re.match(r"^\[(\d+|P\d+)\]\s+", stripped):
-            flush_paragraph()
-            chunks.append(f"<p class='citation'>{format_inline(stripped)}</p>")
-            continue
-        paragraph.append(stripped)
+        if block and (line_kind != kind or kind not in _GROUPED):
+            yield kind, block
+            block = []
+        kind = "code" if line_kind == "fence" else line_kind
+        if line_kind != "fence":
+            block.append(line)
+    if block:
+        yield kind, block
 
-    flush_all()
-    if in_code and code:
-        chunks.append(f"<pre><code>{html.escape(chr(10).join(code))}</code></pre>")
-    return "".join(chunks) or "<p></p>"
+
+def _render_nothing(lines: List[str]) -> str:
+    return ""
+
+
+def _render_code(lines: List[str]) -> str:
+    return f"<pre><code>{html.escape(chr(10).join(lines))}</code></pre>"
+
+
+def _render_paragraph(lines: List[str]) -> str:
+    return f"<p>{format_inline(' '.join(line.strip() for line in lines).strip())}</p>"
+
+
+def _render_list(kind: str, pattern: re.Pattern) -> Callable[[List[str]], str]:
+    def render(lines: List[str]) -> str:
+        items = "".join(f"<li>{format_inline(pattern.match(line).group(1).strip())}</li>" for line in lines)
+        return f"<{kind}>{items}</{kind}>"
+
+    return render
+
+
+def _render_table(lines: List[str]) -> str:
+    rows = [[cell.strip() for cell in line.strip().strip("|").split("|")] for line in lines]
+    rows = [r for r in rows if not all(re.fullmatch(r":?-{2,}:?", c or "--") for c in r)]
+    if not rows:
+        return ""
+    head = "".join(f"<th>{format_inline(c)}</th>" for c in rows[0])
+    body = "".join("<tr>" + "".join(f"<td>{format_inline(c)}</td>" for c in r) + "</tr>" for r in rows[1:])
+    return f"<table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>"
+
+
+def _render_heading(lines: List[str]) -> str:
+    heading = _HEADING.match(lines[0].strip())
+    level = len(heading.group(1))
+    return f"<h{level}>{format_inline(heading.group(2).strip())}</h{level}>"
+
+
+def _render_quote(lines: List[str]) -> str:
+    return f"<blockquote>{format_inline(lines[0].strip()[1:].strip())}</blockquote>"
+
+
+def _render_citation(lines: List[str]) -> str:
+    return f"<p class='citation'>{format_inline(lines[0].strip())}</p>"
+
+
+_GROUPED = {"paragraph", "ul", "ol", "table", "blank"}
+_RENDERERS: Dict[str, Callable[[List[str]], str]] = {
+    "code": _render_code,
+    "paragraph": _render_paragraph,
+    "ul": _render_list("ul", _UNORDERED),
+    "ol": _render_list("ol", _ORDERED),
+    "table": _render_table,
+    "heading": _render_heading,
+    "quote": _render_quote,
+    "citation": _render_citation,
+}
 
 
 def format_inline(text: str) -> str:
