@@ -80,7 +80,17 @@ research-pilot new "Label smoothing and calibration of small classifiers" \
   --run
 ```
 
-OpenRouter works as well: set `LLM_PROVIDER=openrouter`, `OPENROUTER_API_KEY` and OpenRouter model ids for the tiers you use.
+OpenRouter works as well, and tiers can mix providers. The recommended mix, chosen on the Artificial Analysis Intelligence Index and price (October 2026):
+
+| Tier | Provider and model | Index | Price per MTok (in / out) |
+|---|---|---|---|
+| Lite | OpenRouter, `openai/gpt-6-luna` | 38 | $0.10 / $0.50 |
+| Standard and coding | OpenRouter, `anthropic/claude-sonnet-5.5` | 56 | $2 / $10 |
+| Strong | Anthropic, `claude-opus-5-5` at medium effort | 58 | $4 / $20 |
+
+Set `LLM_FALLBACK_PROVIDER=openrouter` and `LLM_FALLBACK_MODEL=anthropic/claude-opus-5.5` so strong work continues on OpenRouter if the Anthropic account runs out of credit. The block is in `.env.example`.
+
+To continue a finished project (for example to run experiments a budget stop skipped), use `research-pilot run <project> --reopen`. It keeps all state, designs and critiques the missing experiments, then hands control back to the planner.
 
 ## Experiments
 

@@ -34,6 +34,7 @@ from .models import (
 )
 
 M = TypeVar("M", bound=BaseModel)
+REPLACE_ATTEMPTS = 10
 PROJECT_ID = re.compile(r"[a-z0-9][a-z0-9-]{0,80}")
 log = logging.getLogger(__name__)
 _Loader = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
@@ -172,12 +173,14 @@ class ProjectStore:
         tmp = path.with_name(f".{path.name}.{secrets.token_hex(3)}.tmp")
         with self._lock:
             tmp.write_text(text, encoding="utf-8")
-            for attempt in range(5):
+            # On Windows a replace fails while a reader (the dashboard, antivirus) holds the file open.
+            for attempt in range(REPLACE_ATTEMPTS):
                 try:
                     os.replace(tmp, path)
                     return
                 except PermissionError:
-                    if attempt == 4:
+                    if attempt == REPLACE_ATTEMPTS - 1:
+                        tmp.unlink(missing_ok=True)
                         raise
                     time.sleep(0.05 * (attempt + 1))
 

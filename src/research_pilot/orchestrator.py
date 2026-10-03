@@ -137,6 +137,23 @@ class Orchestrator:
             self._emit("run_stopped", status=self.project.status, outcome=self.project.outcome, step=self.project.step)
         return self.project
 
+    def reopen(self) -> None:
+        """Continue a finished project: keep all state, design missing experiments, then plan."""
+        if self.project.status != "completed":
+            return
+        self.project.status = "paused"
+        self.project.outcome = ""
+        self.project.stop_reason = ""
+        self.state.log_decision(
+            "reopen",
+            "Reopen the project for more research",
+            "requested by the user",
+            effects=["missing experiments are designed and critiqued, then the planner resumes"],
+        )
+        self.roadmap.append(self._new("DESIGN_EXPERIMENT", mode="design"))
+        self._save_roadmap()
+        self._save()
+
     def _prepare_resume(self, retry_failed: bool = False) -> bool:
         # An action still marked running was interrupted (the process was stopped); run it again.
         for action in self.roadmap:
@@ -378,6 +395,8 @@ class Orchestrator:
             after = [{"type": "RUN_APPROVED"}] if action.params.get("run") else ([{"type": "PLAN"}] if mode == "design" else [])
         if mode == "revise":
             return self._approve(action.params.get("ids") or ids, action.params.get("serious", []), after, result.task_id)
+        if mode == "design":
+            ids = [s.id for s in self.state.experiments.latest_specs() if s.status == "draft"]
         if not ids:
             return self._expand_after(after, [])
         return [self._new("CRITIQUE_DESIGN", target="experiments", ids=ids, after=after)]
