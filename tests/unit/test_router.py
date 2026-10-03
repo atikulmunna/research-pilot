@@ -119,6 +119,24 @@ def test_claude_cost_comes_from_builtin_pricing():
     assert abs(records[0].cost_usd - (2.0 + 1.0)) < 1e-9
 
 
+def test_cost_is_found_for_dated_served_model_names():
+    records = []
+
+    class DatedClient(ScriptedClient):
+        def complete(self, provider, model, messages, **kw):
+            out = super().complete(provider, model, messages, **kw)
+            out.model = f"{model}-20251001"
+            out.prompt_tokens, out.completion_tokens = 1_000_000, 1_000_000
+            return out
+
+    router = ModelRouter(Settings(_env_file=None, llm_provider="anthropic", llm_model="claude-opus-5-5"), client=DatedClient(['{"queries": ["q"]}']))
+    router.listeners.append(records.append)
+    router.json("field.search_queries", "s", "u", QueryPlan)
+    assert records[0].model == "claude-haiku-4-5"
+    assert abs(records[0].cost_usd - (1.0 + 5.0)) < 1e-9
+    assert router.estimate_cost(10, 10, "unknown-model") == 0.0
+
+
 def test_mock_provider_uses_context():
     router = ModelRouter(Settings(_env_file=None, llm_provider="mock", llm_model="mock"))
     context = {"papers": [{"id": "P001", "title": "t", "limitations": []}]}
