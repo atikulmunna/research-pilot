@@ -45,18 +45,26 @@ def _state(store: ProjectStore, settings: Settings) -> ResearchState:
 def overview(store: ProjectStore, settings: Settings) -> Dict[str, Any]:
     state = _state(store, settings)
     project = store.load_project()
-    registry = state.experiments
-    runs = registry.runs()
-    reviews = store.reviews()
-    roadmap = store.roadmap()
     activity = store.activity()
+    return {
+        "project": jsonable(project),
+        "counts": _counts(store, state),
+        "agents": _agent_activity(store, activity),
+        "active_agent": _active_agent(project.status, activity),
+        "max_steps": settings.max_steps,
+        "next_actions": [jsonable(a) for a in store.roadmap() if a.status == "pending"][:8],
+        "evidence": state.graph.summary(settings.allow_synthetic_evidence),
+        "has_manuscript": bool(store.manuscript()),
+    }
+
+
+def _agent_activity(store: ProjectStore, activity: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    """Per agent: finished tasks, the latest result and model calls by tier."""
     agents: Dict[str, Dict[str, Any]] = {
         key: {"name": name, "tasks": 0, "last": "", "last_status": "", "last_finding": "", "tiers": {}} for key, name in AGENT_NAMES.items()
     }
     for row in activity:
-        if row.get("event") != "task":
-            continue
-        result = row.get("result", {})
+        result = row.get("result", {}) if row.get("event") == "task" else {}
         agent = agents.get(result.get("agent"))
         if agent is None:
             continue
@@ -69,39 +77,37 @@ def overview(store: ProjectStore, settings: Settings) -> Dict[str, Any]:
         agent = agents.get(spec.issued_by) if spec else None
         if agent is not None:
             agent["tiers"][call["tier"]] = agent["tiers"].get(call["tier"], 0) + 1
-    active = ""
-    if project.status == "running":
-        for row in reversed(activity):
-            if row.get("event") == "task":
-                break
-            if row.get("event") == "task_started":
-                active = row.get("agent", "")
-                break
+    return agents
+
+
+def _active_agent(status: str, activity: List[Dict[str, Any]]) -> str:
+    """The agent of the latest started task, if that task has not finished yet."""
+    if status != "running":
+        return ""
+    latest = next((row for row in reversed(activity) if row.get("event") in {"task", "task_started"}), None)
+    return latest.get("agent", "") if latest and latest.get("event") == "task_started" else ""
+
+
+def _counts(store: ProjectStore, state: ResearchState) -> Dict[str, int]:
+    registry = state.experiments
+    runs = registry.runs()
+    reviews = store.reviews()
     proposal = state.proposal()
     return {
-        "project": jsonable(project),
-        "counts": {
-            "papers": len(store.papers()),
-            "gaps": len(state.gaps()),
-            "proposal_versions": proposal.version if proposal else 0,
-            "hypotheses": len(state.current_hypotheses()),
-            "hypothesis_versions": len(state.hypotheses()),
-            "experiments": len(registry.latest_specs()),
-            "runs": len(runs),
-            "runs_completed": sum(1 for r in runs if r.status == "completed"),
-            "runs_failed": sum(1 for r in runs if r.status == "failed"),
-            "runs_awaiting": sum(1 for r in runs if r.status == "awaiting_execution"),
-            "decisions": len(store.decisions()),
-            "review_rounds": len(reviews),
-            "open_review_issues": sum(1 for r in reviews for i in r.issues if i.status == "open"),
-            "violations": len(store.read_jsonl("logs/violations.jsonl")),
-        },
-        "agents": agents,
-        "active_agent": active,
-        "max_steps": settings.max_steps,
-        "next_actions": [jsonable(a) for a in roadmap if a.status == "pending"][:8],
-        "evidence": state.graph.summary(settings.allow_synthetic_evidence),
-        "has_manuscript": bool(store.manuscript()),
+        "papers": len(store.papers()),
+        "gaps": len(state.gaps()),
+        "proposal_versions": proposal.version if proposal else 0,
+        "hypotheses": len(state.current_hypotheses()),
+        "hypothesis_versions": len(state.hypotheses()),
+        "experiments": len(registry.latest_specs()),
+        "runs": len(runs),
+        "runs_completed": sum(1 for r in runs if r.status == "completed"),
+        "runs_failed": sum(1 for r in runs if r.status == "failed"),
+        "runs_awaiting": sum(1 for r in runs if r.status == "awaiting_execution"),
+        "decisions": len(store.decisions()),
+        "review_rounds": len(reviews),
+        "open_review_issues": sum(1 for r in reviews for i in r.issues if i.status == "open"),
+        "violations": len(store.read_jsonl("logs/violations.jsonl")),
     }
 
 
