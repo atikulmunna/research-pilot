@@ -54,6 +54,14 @@ def test_unknown_references_are_dropped_and_logged(state):
     assert hyp.motivated_by == ["P001"]
 
 
+def test_decorated_ids_are_kept_and_unknown_ones_dropped(state):
+    state.add_papers([paper("Real paper")], found_by="q")
+    refs = ["P001: Real paper - strong baseline", "[P001]", "P999: Invented - note", "P0011 trailing digits"]
+    assert state.check_paper_refs(refs, "test") == ["P001"]
+    violations = state.drain_violations()
+    assert len(violations) == 2 and "P999" in violations[0]
+
+
 def test_hypothesis_revision_keeps_original_and_records_reason(state):
     h1 = state.add_hypothesis(Hypothesis(statement="original"))
     h2 = state.revise_hypothesis(h1.id, Hypothesis(statement="revised"), reason="result R001 was inconclusive", triggering_evidence=["R001"], decision_id="D001")
