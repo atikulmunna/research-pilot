@@ -2,7 +2,7 @@
 
 Research Pilot takes a research idea to a tested, evidence-mapped manuscript. Twelve specialised agents work on one shared research state (literature base, evidence graph, hypothesis and experiment registries, decision log, adaptive roadmap) under a control-plane orchestrator. The loop does not stop at the first draft: results feed back into planning, and a red-team reviewer's objections send the work back for more literature, new experiments, revised hypotheses or a pivot.
 
-Model calls are **routed by task difficulty, not by agent**. Searching, extraction and summaries run on a lite model at low reasoning effort; novelty judgments, critique, hypothesis and experiment design, interpretation, planning and review run on a strong model at high effort; experiment code goes to a coding tier; deduplication, citation graphs, statistics and citation formatting are plain code.
+Model calls are **routed by task difficulty, not by agent**. Searching, extraction and summaries run on a lite model at low reasoning effort; gap analysis, interpretation, planning, drafting and experiment code run on a standard model; only the hardest judgments (novelty, critique, hypothesis and experiment design, peer review) go to a strong model at high effort; deduplication, citation graphs, statistics and citation formatting are plain code.
 
 ![Research Pilot architecture: twelve agents, the orchestrator, the shared research state, the evidence graph and the experiment registry](resources/architecture.png)
 
@@ -24,14 +24,15 @@ Every model call is a registered task kind with a difficulty and a capability. T
 |---|---|---|---|---|
 | Search queries, field map, paper extraction and summaries, clustering, rewriting | Low to low-medium | Lite | Claude Haiku 4.5 | low |
 | Claim verification against full text | Medium | Lite | Claude Haiku 4.5 | medium |
-| Gap discovery, interpretation, planning, claim-evidence mapping | High | Strong | Claude Opus 5.5 | high |
+| Paper drafting | Medium-high | Standard | Claude Sonnet 5.5 | medium |
+| Experiment implementation and repair | Medium-high | Coding | Claude Sonnet 5.5 | medium |
+| Gap discovery, interpretation, planning, claim-evidence mapping, proposal revision | High | Standard | Claude Sonnet 5.5 | high |
 | Novelty, proposal and design critique, hypothesis and experiment design, review | Very high | Strong | Claude Opus 5.5 | high |
-| Paper drafting | Medium-high | Strong | Claude Opus 5.5 | medium |
-| Experiment implementation and repair | Medium-high | Coding | Claude Opus 5.5 | medium |
 | Deduplication, citation graph, data processing, statistics, citation formatting | Low | Code | none | none |
 
-- Tasks at or above `LLM_STRONG_MIN_DIFFICULTY` (default `medium_high`) use the strong tier. Coding tasks use the coding tier, which falls back to the strong model.
-- If a lite-tier answer cannot be parsed or validated, the call is retried once on the strong tier. Escalations are counted.
+- Tasks at or above `LLM_STANDARD_MIN_DIFFICULTY` (default `medium_high`) use the standard tier and tasks at or above `LLM_STRONG_MIN_DIFFICULTY` (default `very_high`) the strong tier. Coding tasks use the coding tier, which falls back to the standard model.
+- Opus is kept for the very-high work where nothing checks the model afterwards. Standard-tier output is backed by code checks: interpretation verdicts are capped by the statistics, plans are validated before they run, and drafts go through citation and number checks.
+- If a lite or standard answer cannot be parsed or validated, the call is retried once on the next tier up. Escalations are counted.
 - `LLM_TASK_OVERRIDES` moves single tasks between tiers, for example `paper.drafting=lite`.
 - Tokens and cost are tracked per tier and per task (`research-pilot metrics`). Claude prices are built in, so cost budgets work.
 
@@ -68,7 +69,7 @@ LLM_PROVIDER=mock LITERATURE_PROVIDERS=mock EXPERIMENT_EXECUTOR=simulated \
   research-pilot new "retrieval augmented generation under distribution shift" --run
 ```
 
-For a real project, put your key in `.env` (`ANTHROPIC_API_KEY=...`). The defaults use Claude Opus 5.5 for strong and coding work and Claude Haiku 4.5 for lite work. A full run costs about **$3.30** with these defaults (estimated from measured prompt sizes; how long the strong model thinks moves it between roughly $2.50 and $5), so keep a cap such as `MAX_COST_USD=3.80`. At 70% of the cap the orchestrator writes and reviews the manuscript before anything else.
+For a real project, put your key in `.env` (`ANTHROPIC_API_KEY=...`). The defaults use Claude Haiku 4.5 for lite work, Claude Sonnet 5.5 for standard and coding work, and Claude Opus 5.5 only for very-high-difficulty work. A full run costs about **$2.45** with these defaults (estimated from measured prompt sizes; how long the models think moves it between roughly $1.80 and $3.70), so keep a cap such as `MAX_COST_USD=3.80`. At 70% of the cap the orchestrator writes and reviews the manuscript before anything else.
 
 ```bash
 research-pilot new "Label smoothing and calibration of small classifiers" \
@@ -159,9 +160,9 @@ Settings come from the environment or `.env`; `.env.example` lists them all.
 | Variable | Default | Meaning |
 |---|---|---|
 | `LLM_PROVIDER`, `LLM_MODEL` | `anthropic`, `claude-opus-5-5` | Default route (`anthropic`, `openrouter`, `mock`) |
-| `LLM_{LITE,STRONG,CODING}_PROVIDER/_MODEL` | empty | Per-tier model; lite defaults to `claude-haiku-4-5` on anthropic |
+| `LLM_{LITE,STANDARD,STRONG,CODING}_PROVIDER/_MODEL` | empty | Per-tier model; on anthropic, lite defaults to `claude-haiku-4-5` and standard and coding to `claude-sonnet-5-5` |
 | `LLM_{TIER}_REASONING_EFFORT` | `auto` | `auto` follows difficulty; `low`, `medium`, `high` fix it; `none` sends nothing |
-| `LLM_STRONG_MIN_DIFFICULTY` | `medium_high` | Difficulty threshold for the strong tier |
+| `LLM_STANDARD_MIN_DIFFICULTY`, `LLM_STRONG_MIN_DIFFICULTY` | `medium_high`, `very_high` | Difficulty thresholds for the standard and strong tiers |
 | `LITERATURE_PROVIDERS` | `openalex,arxiv` | Also `semantic_scholar` (set `SEMANTIC_SCHOLAR_API_KEY`) or `mock` |
 | `LITERATURE_FULLTEXT_TOP_K` | `0` | Read open-access PDFs of the top papers and verify their claims |
 | `EXPERIMENT_EXECUTOR` | `manual` | `manual`, `subprocess` or `simulated` |

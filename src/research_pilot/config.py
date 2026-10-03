@@ -3,7 +3,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     # Default route: anthropic, openrouter or mock. Any tier left unconfigured falls back to it,
-    # except the lite tier on anthropic, which defaults to claude-haiku-4-5.
+    # except on anthropic, where lite defaults to claude-haiku-4-5 and standard to claude-sonnet-5-5.
     llm_provider: str = "anthropic"
     llm_model: str = "claude-opus-5-5"
 
@@ -14,23 +14,31 @@ class Settings(BaseSettings):
     llm_lite_temperature: str = "0.1"
     llm_lite_max_tokens: int = 0
 
-    # Strong tier: high-difficulty reasoning (novelty, critique, hypotheses, design, review).
+    # Standard tier: high and medium-high work (gaps, interpretation, planning, drafting).
+    llm_standard_provider: str = ""
+    llm_standard_model: str = ""
+    llm_standard_reasoning_effort: str = "auto"
+    llm_standard_temperature: str = ""
+    llm_standard_max_tokens: int = 0
+
+    # Strong tier: very-high-difficulty reasoning (novelty, critique, hypotheses, design, review).
     llm_strong_provider: str = ""
     llm_strong_model: str = ""
     llm_strong_reasoning_effort: str = "auto"
     llm_strong_temperature: str = ""
     llm_strong_max_tokens: int = 0
 
-    # Coding tier: experiment implementation and debugging. Falls back to strong, then default.
+    # Coding tier: experiment implementation and debugging. Falls back to the standard tier.
     llm_coding_provider: str = ""
     llm_coding_model: str = ""
     llm_coding_reasoning_effort: str = "auto"
     llm_coding_temperature: str = ""
     llm_coding_max_tokens: int = 0
 
-    # Tasks at or above this difficulty go to the strong tier.
-    llm_strong_min_difficulty: str = "medium_high"
-    # Retry a lite task once on the strong tier when its output cannot be parsed or validated.
+    # Tasks at or above these difficulties go to the standard and strong tiers.
+    llm_standard_min_difficulty: str = "medium_high"
+    llm_strong_min_difficulty: str = "very_high"
+    # Retry a lite or standard task once on the next tier up when its output cannot be parsed or validated.
     llm_escalate_on_failure: bool = True
     # Per-task tier overrides, e.g. "paper.drafting=lite,literature.clustering=strong".
     llm_task_overrides: str = ""

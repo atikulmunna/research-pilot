@@ -34,7 +34,7 @@ def test_api_project_lifecycle(mock_settings):
         evidence = client.get(f"/api/v1/projects/{project_id}/evidence?graph=true").json()
         assert evidence["graph"]["nodes"] and "hotspots" in evidence["queries"]
         metrics = client.get(f"/api/v1/projects/{project_id}/metrics").json()
-        assert {"lite", "strong", "coding"} <= set(metrics["usage"]["by_tier"])
+        assert {"lite", "standard", "strong", "coding"} <= set(metrics["usage"]["by_tier"])
         assert "<html>" in client.get(f"/api/v1/projects/{project_id}/manuscript?format=html").text
         assert client.get(f"/api/v1/projects/{project_id}/activity?limit=5").json()["events"]
         assert client.post(f"/api/v1/projects/{project_id}/run").status_code == 409
@@ -81,7 +81,7 @@ def test_cli_end_to_end(tmp_path, monkeypatch):
     runner = CliRunner()
 
     routes = json.loads(runner.invoke(cli_app, ["routing", "--json"]).output)
-    assert {r["tier"] for r in routes} == {"lite", "strong", "coding", "code"}
+    assert {r["tier"] for r in routes} == {"lite", "standard", "strong", "coding", "code"}
 
     created = runner.invoke(cli_app, ["new", "graph neural networks for chemistry", "--run", "--quiet", "--constraint", "one GPU"])
     assert created.exit_code == 0, created.output
