@@ -28,7 +28,7 @@ def test_full_swarm_run_with_mock_models(mock_settings):
 
     view = overview(store, settings)
     assert all(agent["tasks"] > 0 for agent in view["agents"].values()), view["agents"]
-    assert {"lite", "strong", "coding"} <= set(project.usage.by_tier)
+    assert {"lite", "standard", "strong", "coding"} <= set(project.usage.by_tier)
     assert view["counts"]["violations"] == 0
 
     kinds = [d.kind for d in store.decisions()]

@@ -50,6 +50,6 @@ jobs:
           project = status["project"]
           assert project["status"] == "completed", project
           assert all(agent["tasks"] > 0 for agent in status["agents"].values()), status["agents"]
-          assert {"lite", "strong", "coding"} <= set(project["usage"]["by_tier"]), project["usage"]
+          assert {"lite", "standard", "strong", "coding"} <= set(project["usage"]["by_tier"]), project["usage"]
           print("Swarm smoke run passed:", project["outcome"])
           PY

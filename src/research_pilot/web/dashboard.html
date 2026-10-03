@@ -18,7 +18,8 @@
   --cobalt: #2b4acb;
   --cobalt-soft: #dfe5fb;
   --tier-lite: #a7c0d3;
-  --tier-coding: #6585a6;
+  --tier-standard: #83a1bb;
+  --tier-coding: #5d7d9e;
   --tier-strong: #23405f;
   --tier-code: #9aa8b3;
   --ev-supported: #1d7a4c;
@@ -34,14 +35,14 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --page: #10171d; --surface: #172129; --sunk: #1e2a33; --ink: #e4ebf0; --graphite: #9aabb8; --rule: #2c3a45;
-    --cobalt: #7d95f2; --cobalt-soft: #233066; --tier-lite: #8eaac0; --tier-coding: #5f86ad; --tier-strong: #c9dbea; --tier-code: #6b7a86;
+    --cobalt: #7d95f2; --cobalt-soft: #233066; --tier-lite: #4e6a80; --tier-standard: #6d8fae; --tier-coding: #93b3cf; --tier-strong: #c9dbea; --tier-code: #6b7a86;
     --ev-supported: #4fbf86; --ev-partial: #e0a547; --ev-hypothesis: #9b91f0; --ev-speculation: #b79bd6; --ev-contradicted: #ef7b7b; --ev-unknown: #8796a2;
     color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
   --page: #10171d; --surface: #172129; --sunk: #1e2a33; --ink: #e4ebf0; --graphite: #9aabb8; --rule: #2c3a45;
-  --cobalt: #7d95f2; --cobalt-soft: #233066; --tier-lite: #8eaac0; --tier-coding: #5f86ad; --tier-strong: #c9dbea; --tier-code: #6b7a86;
+  --cobalt: #7d95f2; --cobalt-soft: #233066; --tier-lite: #4e6a80; --tier-standard: #6d8fae; --tier-coding: #93b3cf; --tier-strong: #c9dbea; --tier-code: #6b7a86;
   --ev-supported: #4fbf86; --ev-partial: #e0a547; --ev-hypothesis: #9b91f0; --ev-speculation: #b79bd6; --ev-contradicted: #ef7b7b; --ev-unknown: #8796a2;
   color-scheme: dark;
 }
@@ -111,7 +112,7 @@ aside h2, .pane h2 { font-size: 15px; margin: 0 0 10px; font-weight: 600; }
 .tierbar span { display: block; height: 100%; }
 .legend { display: grid; grid-template-columns: 12px 1fr auto; gap: 4px 8px; align-items: center; font-size: 13px; }
 .swatch { width: 12px; height: 12px; border-radius: 3px; }
-.sw-lite { background: var(--tier-lite); } .sw-coding { background: var(--tier-coding); } .sw-strong { background: var(--tier-strong); }
+.sw-lite { background: var(--tier-lite); } .sw-standard { background: var(--tier-standard); } .sw-coding { background: var(--tier-coding); } .sw-strong { background: var(--tier-strong); }
 .sw-code { border: 1.5px dashed var(--tier-code); }
 .checks { list-style: none; padding: 0; margin: 0; font-size: 14px; }
 .checks li { display: grid; grid-template-columns: 18px 1fr; gap: 6px; padding: 3px 0; }
@@ -252,7 +253,7 @@ const LOOPS = [
   [10, 2, "more literature"], [10, 4, "pivot or revise proposal"],
 ];
 const PHASES = ["initialization", "literature_discovery", "proposal_validation", "hypothesis_formation", "experimental_design", "experimental_execution", "research_loop", "paper_production", "completed"];
-const TIERS = [["lite", "Lite"], ["coding", "Coding"], ["strong", "Strong"]];
+const TIERS = [["lite", "Lite"], ["standard", "Standard"], ["coding", "Coding"], ["strong", "Strong"]];
 const TABS = [["claims", "Claims and evidence"], ["research", "Hypotheses and experiments"], ["literature", "Literature"], ["decisions", "Decisions"], ["review", "Critique and review"], ["manuscript", "Manuscript"], ["activity", "Activity"]];
 
 const S = { projects: [], id: "", overview: null, tab: "claims", lastStep: -1, timer: null, key: "" };

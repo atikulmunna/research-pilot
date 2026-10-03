@@ -35,6 +35,7 @@ class Difficulty(IntEnum):
 class Tier(str, Enum):
     CODE = "code"
     LITE = "lite"
+    STANDARD = "standard"
     STRONG = "strong"
     CODING = "coding"
 
@@ -100,7 +101,8 @@ def get_task(kind: str) -> TaskSpec:
 
 def resolve_tier(
     spec: TaskSpec,
-    strong_min: Difficulty = Difficulty.MEDIUM_HIGH,
+    standard_min: Difficulty = Difficulty.MEDIUM_HIGH,
+    strong_min: Difficulty = Difficulty.VERY_HIGH,
     overrides: Mapping[str, Tier] | None = None,
 ) -> Tier:
     override = (overrides or {}).get(spec.kind)
@@ -110,7 +112,11 @@ def resolve_tier(
         return Tier.CODE
     if spec.capability is Capability.CODING:
         return Tier.CODING
-    return Tier.STRONG if spec.difficulty >= strong_min else Tier.LITE
+    if spec.difficulty >= strong_min:
+        return Tier.STRONG
+    if spec.difficulty >= standard_min:
+        return Tier.STANDARD
+    return Tier.LITE
 
 
 def effort_for(difficulty: Difficulty) -> str:

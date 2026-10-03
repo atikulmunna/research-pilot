@@ -23,8 +23,10 @@ from .tasks import TASKS, Difficulty, Tier, effort_for, get_task, parse_override
 
 T = TypeVar("T", bound=BaseModel)
 EFFORTS = {"low", "medium", "high"}
-# Lite-tier model used when the default provider has an obvious cheap sibling and no lite model is set.
-LITE_DEFAULTS = {"anthropic": "claude-haiku-4-5"}
+# Per-provider models for tiers left unconfigured; other tiers use the default model.
+TIER_DEFAULTS = {"anthropic": {Tier.LITE: "claude-haiku-4-5", Tier.STANDARD: "claude-sonnet-5-5"}}
+# A lite or standard answer that cannot be used is retried once on the next tier up.
+ESCALATION = {Tier.LITE: Tier.STANDARD, Tier.STANDARD: Tier.STRONG}
 # Anthropic first-party prices in USD per million tokens (input, output), cached 2026-09-25.
 # The API does not report cost, so budgets rely on this table. Override with LLM_PRICING.
 DEFAULT_PRICING: Dict[str, tuple[float, float]] = {
@@ -136,6 +138,7 @@ class ModelRouter:
             timeout_s=settings.llm_request_timeout_s,
         )
         self.mock = mock or MockResponder()
+        self.standard_min = Difficulty.parse(settings.llm_standard_min_difficulty)
         self.strong_min = Difficulty.parse(settings.llm_strong_min_difficulty)
         self.overrides = parse_overrides(settings.llm_task_overrides)
         self.pricing = {**DEFAULT_PRICING, **parse_pricing(settings.llm_pricing)}
@@ -156,13 +159,17 @@ class ModelRouter:
             provider = normalize_provider(getattr(s, f"llm_{prefix}_provider")) or default[0]
             return provider, model
 
+        def provider_default(for_tier: Tier) -> tuple[str, str]:
+            return default[0], TIER_DEFAULTS.get(default[0], {}).get(for_tier, default[1])
+
         if tier is Tier.LITE:
-            lite_default = (default[0], LITE_DEFAULTS.get(default[0], default[1]))
-            provider, model = own("lite") or lite_default
+            provider, model = own("lite") or provider_default(Tier.LITE)
+        elif tier is Tier.STANDARD:
+            provider, model = own("standard") or provider_default(Tier.STANDARD)
         elif tier is Tier.STRONG:
             provider, model = own("strong") or default
         elif tier is Tier.CODING:
-            provider, model = own("coding") or own("strong") or default
+            provider, model = own("coding") or own("standard") or provider_default(Tier.STANDARD)
         else:
             return TierConfig("code", "", "none", None, None)
         prefix = tier.value
@@ -177,7 +184,7 @@ class ModelRouter:
 
     def resolve(self, task_kind: str, tier: Tier | None = None) -> Route:
         spec = get_task(task_kind)
-        chosen = tier or resolve_tier(spec, self.strong_min, self.overrides)
+        chosen = tier or resolve_tier(spec, self.standard_min, self.strong_min, self.overrides)
         cfg = self.tier_config(chosen)
         if chosen is Tier.CODE:
             return Route(spec.kind, spec.label, spec.difficulty, chosen, "code", "", None)
@@ -229,8 +236,8 @@ class ModelRouter:
         except LLMOutputError as exc:
             retry_route = route
             escalated = False
-            if self.settings.llm_escalate_on_failure and route.tier is Tier.LITE:
-                retry_route = self.resolve(task_kind, tier=Tier.STRONG)
+            if self.settings.llm_escalate_on_failure and route.tier in ESCALATION:
+                retry_route = self.resolve(task_kind, tier=ESCALATION[route.tier])
                 escalated = True
             feedback = [
                 {"role": "assistant", "content": (exc.raw or "")[:4000]},

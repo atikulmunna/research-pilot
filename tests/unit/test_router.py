@@ -21,7 +21,14 @@ class ScriptedClient:
 
 
 def settings(**overrides):
-    values = dict(_env_file=None, llm_provider="openrouter", llm_model="default", llm_lite_model="lite-m", llm_strong_model="strong-m")
+    values = dict(
+        _env_file=None,
+        llm_provider="openrouter",
+        llm_model="default",
+        llm_lite_model="lite-m",
+        llm_standard_model="standard-m",
+        llm_strong_model="strong-m",
+    )
     values.update(overrides)
     return Settings(**values)
 
@@ -43,12 +50,20 @@ def test_unparseable_output_is_repaired_on_the_lite_tier():
     assert [c["model"] for c in client.calls] == ["lite-m", "lite-m"]
 
 
-def test_lite_failure_escalates_to_strong():
+def test_lite_failure_escalates_to_standard():
     client = ScriptedClient(["nothing useful", "still nothing", '{"queries": ["x"]}'])
     router = ModelRouter(settings(), client=client)
     out = router.json("field.search_queries", "s", "u", QueryPlan)
     assert out.queries == ["x"]
-    assert client.calls[-1]["model"] == "strong-m"
+    assert client.calls[-1]["model"] == "standard-m"
+    assert router.usage_by_tier()["standard"]["escalations"] == 1
+
+
+def test_standard_failure_escalates_to_strong():
+    client = ScriptedClient(["no json here", "no json either", '{"gaps": []}'])
+    router = ModelRouter(settings(), client=client)
+    router.json("gap.discovery", "s", "u", GapAnalysis)
+    assert [c["model"] for c in client.calls] == ["standard-m", "lite-m", "strong-m"]
     assert router.usage_by_tier()["strong"]["escalations"] == 1
 
 
@@ -58,12 +73,13 @@ def test_escalation_can_be_disabled():
     assert {c["model"] for c in client.calls} == {"lite-m"}
 
 
-def test_strong_tasks_use_strong_model_with_high_effort():
-    client = ScriptedClient(['{"gaps": [{"description": "d", "novelty_strength": "high"}]}'])
-    out = ModelRouter(settings(), client=client).json("gap.discovery", "s", "u", GapAnalysis)
+def test_high_and_very_high_tasks_use_standard_and_strong_models():
+    client = ScriptedClient(['{"gaps": [{"description": "d", "novelty_strength": "high"}]}', '{"gaps": []}'])
+    router = ModelRouter(settings(), client=client)
+    out = router.json("gap.discovery", "s", "u", GapAnalysis)
+    router.json("novelty.analysis", "s", "u", GapAnalysis)
     assert out.gaps[0].novelty_strength == "strong"
-    assert client.calls[0]["model"] == "strong-m"
-    assert client.calls[0]["effort"] == "high"
+    assert [(c["model"], c["effort"]) for c in client.calls] == [("standard-m", "high"), ("strong-m", "high")]
 
 
 def test_fallback_model_used_when_primary_fails():
@@ -99,8 +115,8 @@ def test_claude_cost_comes_from_builtin_pricing():
     )
     router.listeners.append(records.append)
     router.json("gap.discovery", "s", "u", GapAnalysis)
-    assert records[0].model == "claude-opus-5-5"
-    assert abs(records[0].cost_usd - (4.0 + 2.0)) < 1e-9
+    assert records[0].model == "claude-sonnet-5-5"
+    assert abs(records[0].cost_usd - (2.0 + 1.0)) < 1e-9
 
 
 def test_mock_provider_uses_context():
