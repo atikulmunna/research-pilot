@@ -7,10 +7,14 @@ Rules enforced here:
 """
 
 import hashlib
+import re
 from typing import Dict, List
 
 from .models import ExperimentRun, ExperimentSpec, RunAttempt, RunRecord, now_iso
 from .store import ProjectStore, load_yaml
+
+
+RUN_ID = re.compile(r"R\d{1,6}")
 
 
 class RegistryError(RuntimeError):
@@ -99,6 +103,8 @@ class ExperimentRegistry:
         return items
 
     def run(self, run_id: str) -> ExperimentRun | None:
+        if not RUN_ID.fullmatch(run_id or ""):
+            return None
         data = self.store.read_yaml(f"experiments/runs/{run_id}/run.yaml")
         return ExperimentRun.model_validate(data) if data else None
 

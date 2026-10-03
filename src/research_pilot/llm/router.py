@@ -6,6 +6,7 @@ the provider configured for that tier. Agents never pick models themselves.
 """
 
 import json
+import logging
 import re
 import time
 from dataclasses import asdict, dataclass, field
@@ -23,6 +24,7 @@ from .schema import render_schema
 from .tasks import TASKS, Difficulty, Tier, effort_for, get_task, parse_overrides, resolve_tier
 
 T = TypeVar("T", bound=BaseModel)
+log = logging.getLogger(__name__)
 EFFORTS = {"low", "medium", "high"}
 # Per-provider models for tiers left unconfigured; other tiers use the default model.
 TIER_DEFAULTS = {"anthropic": {Tier.LITE: "claude-haiku-4-5", Tier.STANDARD: "claude-sonnet-5-5"}}
@@ -407,8 +409,8 @@ class ModelRouter:
         for listener in list(self.listeners):
             try:
                 listener(record)
-            except Exception:
-                continue
+            except Exception as exc:
+                log.warning("call listener failed: %s", exc)
 
     def usage_by_tier(self) -> Dict[str, Dict[str, float]]:
         out: Dict[str, Dict[str, float]] = {}

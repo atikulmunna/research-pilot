@@ -7,6 +7,7 @@ hands control to the Research Planner for the adaptive research loop, enforces b
 records decisions, and decides when the work is complete.
 """
 
+import logging
 import time
 from dataclasses import asdict
 from threading import Event
@@ -31,6 +32,7 @@ SIGNIFICANT = {
     "REVISE_PROPOSAL",
     "SEARCH_LITERATURE",
 }
+log = logging.getLogger(__name__)
 # Share of the cost or token budget after which the manuscript is written before anything else.
 ENDGAME_SHARE = 0.7
 
@@ -685,8 +687,8 @@ class Orchestrator:
         if self.on_event:
             try:
                 self.on_event(payload)
-            except Exception:
-                pass
+            except Exception as exc:
+                log.warning("event callback failed for %s: %s", event, exc)
 
     def _phase(self, phase: str) -> None:
         if self.project.phase != phase:
