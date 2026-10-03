@@ -172,3 +172,40 @@ def test_reopen_is_a_no_op_for_unfinished_projects(mock_settings):
     store = create_project(settings, "unfinished topic")
     Orchestrator(settings, store).reopen()
     assert store.load_project().status == "created" and store.decisions() == []
+
+
+def spend(store, amount):
+    project = store.load_project()
+    project.usage.cost_usd = amount
+    store.save_project(project)
+
+
+def test_endgame_keeps_a_reserve_for_writing(mock_settings):
+    settings = mock_settings(max_cost_usd=5.0)
+    near = create_project(settings, "near the cap")
+    spend(near, 4.5)
+    Orchestrator(settings, near)._maybe_endgame(limit=1000)
+    assert [d.kind for d in near.decisions()] == ["endgame"]
+    assert near.roadmap()[0].type == "WRITE_PAPER"
+
+    far = create_project(settings, "far from the cap")
+    spend(far, 3.0)
+    Orchestrator(settings, far)._maybe_endgame(limit=1000)
+    assert far.decisions() == [] and far.roadmap() == []
+
+
+def test_endgame_rewrites_a_manuscript_that_predates_new_results(mock_settings):
+    settings = mock_settings(max_cost_usd=100.0)
+    store, project, _ = run_project(settings)
+    assert Orchestrator(settings, store)._manuscript_current()
+
+    state = ResearchState(store, settings)
+    run = next(r for r in state.experiments.runs() if r.status == "completed")
+    run.completed_at = "2999-01-01T00:00:00+00:00"
+    store.write_yaml(f"experiments/runs/{run.id}/run.yaml", run)
+    spend(store, 99.5)
+
+    orchestrator = Orchestrator(settings, store)
+    assert not orchestrator._manuscript_current()
+    orchestrator._maybe_endgame(limit=1000)
+    assert store.decisions()[-1].kind == "endgame" and "predates" in store.decisions()[-1].reason
