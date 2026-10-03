@@ -1,7 +1,10 @@
+import inspect
 from types import SimpleNamespace
 
 import pytest
 import requests
+from anthropic.resources.beta.messages import Messages as BetaMessages
+from anthropic.resources.messages import Messages as StableMessages
 
 from research_pilot.llm.providers import FALLBACK_BETA, ModelRefusal, ProviderClient
 
@@ -29,6 +32,11 @@ class FakeAnthropic:
         self.beta = SimpleNamespace(messages=SimpleNamespace(create=lambda **kw: self._record("beta", kw, response)))
 
     def _record(self, surface, params, response):
+        # Reject arguments the real SDK method would reject, so signature drift fails here.
+        method = BetaMessages.create if surface == "beta" else StableMessages.create
+        unknown = set(params) - set(inspect.signature(method).parameters)
+        if unknown:
+            raise TypeError(f"{surface} messages.create() got unexpected arguments {sorted(unknown)}")
         self.calls.append((surface, params))
         return response
 
@@ -52,9 +60,9 @@ def test_haiku_uses_thinking_budget_only_above_low_effort():
     client.complete("anthropic", "claude-haiku-4-5", MSG, reasoning_effort="high", max_tokens=4000)
     (s1, low), (s2, high) = fake.calls
     assert s1 == s2 == "stable"
-    assert "thinking" not in low and "output_config" not in low and low["temperature"] == 0.1
+    assert "thinking" not in low and "output_config" not in low and "temperature" not in low
     assert high["thinking"] == {"type": "enabled", "budget_tokens": 8192}
-    assert high["max_tokens"] > 8192 and "temperature" not in high
+    assert high["max_tokens"] > 8192
 
 
 def test_models_without_fallback_support_use_the_stable_endpoint():

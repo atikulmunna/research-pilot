@@ -108,13 +108,12 @@ class ProviderClient:
         if system:
             params["system"] = system
         client = self.anthropic_client()
+        # The 1.x SDK no longer accepts sampling parameters, so temperature is not sent to Anthropic.
         if uses_thinking_budget(model):
             budget = LEGACY_THINKING_BUDGET.get(effort or "")
             if budget:
                 params["thinking"] = {"type": "enabled", "budget_tokens": budget}
                 params["max_tokens"] = max(params["max_tokens"], budget + 4096)
-            elif temperature is not None:
-                params["temperature"] = temperature
             response = client.messages.create(**params)
         else:
             params["thinking"] = {"type": "adaptive"}
