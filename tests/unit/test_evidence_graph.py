@@ -61,7 +61,7 @@ def test_literature_alone_cannot_establish_a_contribution():
         g.add_node(pid, "paper", pid)
         g.add_edge(pid, "C1", "supports")
     state, detail = g.derive_state("C1")
-    assert state == "PARTIALLY_SUPPORTED" and "literature alone" in detail["reason"]
+    assert state == "HYPOTHESIS" and "untested" in detail["reason"]
     g.add_node("C2", "claim", "background", kind="background")
     g.add_edge("P001", "C2", "supports")
     g.add_edge("P002", "C2", "supports")
