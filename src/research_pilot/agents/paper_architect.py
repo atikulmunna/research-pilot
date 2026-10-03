@@ -62,7 +62,8 @@ class PaperArchitect(Agent):
             evidence,
             f"Papers you may cite as [P###]:\n{paper_digest(papers, detail=False)}",
             "Writing rules: claims whose evidence state is not SUPPORTED must be phrased as preliminary or hypothetical. "
-            "Report negative and inconclusive results. Put synthetic, missing or contradictory evidence in Limitations.",
+            "Report negative and inconclusive results. Put synthetic, missing or contradictory evidence in Limitations. "
+            "Disclose every listed run deviation from the protocol in Methods.",
         ]
         issues = [i for r in self.store.reviews() for i in r.issues if i.status == "open"]
         if revising:
@@ -123,6 +124,8 @@ class PaperArchitect(Agent):
             lines.append(f"    - {run.id} ({spec.key}, {spec.kind}): {verdict}" + (" [synthetic]" if run.synthetic else ""))
             if interp:
                 lines.append(f"      interpretation: {clip(interp.verdict_rationale, 300)}")
+            if run.deviations:
+                lines.append(f"      deviations from the protocol: {clip('; '.join(run.deviations), 800)}")
         return lines
 
     def _tables(self) -> List[Tuple[str, str]]:
@@ -190,7 +193,7 @@ class PaperArchitect(Agent):
             deviations = "; ".join(run.deviations) or "none"
             lines.append(
                 f"| {run.id} | {run.spec_key} | {run.status} | {run.code_version} | {run.seeds} | {run.executor} | "
-                f"{'yes' if run.synthetic else 'no'} | {len(run.attempts)} | {clip(deviations, 200)} |"
+                f"{'yes' if run.synthetic else 'no'} | {len(run.attempts)} | {deviations} |"
             )
         lines.append("")
         for spec in registry.specs():
