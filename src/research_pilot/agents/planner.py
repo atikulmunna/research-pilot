@@ -278,6 +278,9 @@ class ResearchPlanner(Agent):
             f"Experiment runs left: {budget.get('runs_left', '?')}. Review rounds used: {len(self.store.reviews())} of {self.settings.max_review_rounds}.",
             self.project_block(),
         ]
+        if budget.get("cost_cap"):
+            left = budget["cost_cap"] - budget.get("cost_spent", 0.0)
+            lines.insert(1, f"Cost: ${budget.get('cost_spent', 0.0):.2f} spent of a ${budget['cost_cap']:.2f} budget (${left:.2f} left). Weigh each action's cost against what is left.")
         if novelty:
             lines.append(f"Novelty of proposal v{novelty.proposal_version}: {novelty.verdict} ({novelty.novelty_strength}, confidence {novelty.confidence:.2f})")
         lines.append("Hypotheses:")
