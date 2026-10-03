@@ -36,6 +36,7 @@ from .registry import ExperimentRegistry
 from .store import ProjectStore
 
 PAPER_SOURCES = {"openalex", "semantic_scholar", "arxiv", "mock"}
+LEADING_ID = re.compile(r"[A-Z]{1,2}\d+(?:-\d+)?(?:@v\d+)?(?![\w@])")
 
 
 def normalize_title(title: str) -> str:
@@ -86,11 +87,14 @@ class ResearchState:
             ref = (raw or "").strip().strip("[]{}")
             if not ref:
                 continue
+            # Models sometimes decorate an id ("P042: Title - note"); keep the id when it is known.
+            leading = LEADING_ID.match(ref)
+            ref = ref if ref in allowed or not leading else leading.group(0)
             if ref in allowed:
                 if ref not in out:
                     out.append(ref)
             else:
-                self.violation("no_fabricated_evidence", f"{context}: dropped unknown reference '{ref}'")
+                self.violation("no_fabricated_evidence", f"{context}: dropped unknown reference '{ref[:120]}'")
         return out
 
     # ------------------------------------------------------------ papers
