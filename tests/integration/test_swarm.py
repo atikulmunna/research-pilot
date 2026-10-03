@@ -132,3 +132,20 @@ def test_failed_project_resumes_from_failed_action(mock_settings):
     FlakyMock.broken = False
     project = Orchestrator(settings, store, router=ModelRouter(settings, mock=FlakyMock())).run()
     assert project.status == "completed", project.error
+
+
+def test_interrupted_action_is_rerun_on_resume(mock_settings):
+    settings = mock_settings()
+    store = create_project(settings, "interrupted topic")
+    project = store.load_project()
+    project.status = "running"
+    store.save_project(project)
+    orchestrator = Orchestrator(settings, store)
+    action = orchestrator._new("SCOUT_FIELD")
+    action.status = "running"
+    store.save_roadmap([action])
+
+    project = Orchestrator(settings, store).run(max_steps=3)
+    roadmap = store.roadmap()
+    assert roadmap[0].status == "done" and store.field_map() is not None
+    assert any(a.type == "SEARCH_LITERATURE" for a in roadmap), "the interrupted action's follow-ups were queued"

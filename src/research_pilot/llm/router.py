@@ -6,6 +6,7 @@ the provider configured for that tier. Agents never pick models themselves.
 """
 
 import json
+import re
 import time
 from dataclasses import asdict, dataclass, field
 from threading import Lock
@@ -27,6 +28,7 @@ EFFORTS = {"low", "medium", "high"}
 TIER_DEFAULTS = {"anthropic": {Tier.LITE: "claude-haiku-4-5", Tier.STANDARD: "claude-sonnet-5-5"}}
 # A lite or standard answer that cannot be used is retried once on the next tier up.
 ESCALATION = {Tier.LITE: Tier.STANDARD, Tier.STANDARD: Tier.STRONG}
+DATE_SUFFIX = re.compile(r"-\d{8}$")
 # Anthropic first-party prices in USD per million tokens (input, output), cached 2026-09-25.
 # The API does not report cost, so budgets rely on this table. Override with LLM_PRICING.
 DEFAULT_PRICING: Dict[str, tuple[float, float]] = {
@@ -339,7 +341,7 @@ class ModelRouter:
                 if idx == len(candidates) - 1:
                     raise
                 continue
-            cost = completion.cost_usd or self._estimate_cost(completion.model or model, completion)
+            cost = completion.cost_usd or self.estimate_cost(completion.prompt_tokens, completion.completion_tokens, completion.model, model)
             self._record(
                 CallRecord(
                     task=route.task,
@@ -361,11 +363,14 @@ class ModelRouter:
             return completion
         raise RuntimeError("No completion route available.")
 
-    def _estimate_cost(self, model: str, completion: Completion) -> float:
-        price = self.pricing.get(model) or self.pricing.get(model.split("/")[-1])
-        if not price:
-            return 0.0
-        return (completion.prompt_tokens * price[0] + completion.completion_tokens * price[1]) / 1_000_000
+    def estimate_cost(self, prompt_tokens: int, completion_tokens: int, *models: str) -> float:
+        """Price tokens by the first known model name (served names carry a date suffix)."""
+        for name in models:
+            base = DATE_SUFFIX.sub("", (name or "").split("/")[-1])
+            price = self.pricing.get(name) or self.pricing.get(base)
+            if price:
+                return (prompt_tokens * price[0] + completion_tokens * price[1]) / 1_000_000
+        return 0.0
 
     # ------------------------------------------------------------ metrics
 

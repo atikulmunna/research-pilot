@@ -136,6 +136,10 @@ class Orchestrator:
         return self.project
 
     def _prepare_resume(self, retry_failed: bool = False) -> bool:
+        # An action still marked running was interrupted (the process was stopped); run it again.
+        for action in self.roadmap:
+            if action.status == "running":
+                action.status = "pending"
         if retry_failed:
             failed = next((a for a in reversed(self.roadmap) if a.status == "failed"), None)
             if failed is not None:
