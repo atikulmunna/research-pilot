@@ -125,3 +125,11 @@ def unique(items: Iterable[str]) -> List[str]:
             seen.add(key.lower())
             out.append(key)
     return out
+
+
+def match_by_id(returned: List[Any], ids: List[str]) -> List[Any]:
+    """Align items a model returned with the ids it was asked about: by id, else by position."""
+    by_id = {str(getattr(item, "id", "")).strip(): item for item in returned}
+    if len(returned) == len(ids):
+        return [by_id.get(i, item) for i, item in zip(ids, returned)]
+    return [by_id.get(i) for i in ids]

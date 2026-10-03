@@ -1,5 +1,5 @@
 from ..state.models import ExperimentPlan, TaskEnvelope
-from .base import Agent, as_yaml, clip
+from .base import Agent, as_yaml, clip, match_by_id
 from .hypothesis import HYPOTHESIS_FIELDS
 
 SPEC_EXCLUDE = {"status", "change_log", "critique_notes", "created_at", "hypothesis_version"}
@@ -88,29 +88,34 @@ class ExperimentDesigner(Agent):
         )
 
     def _revise(self, task: TaskEnvelope):
+        """Revise every draft design that has serious criticisms, in one call."""
         ids = list(task.inputs.get("ids", []))
         criticisms = [c for c in self.state.open_criticisms("experiments") if c.severity in {"fatal", "major"}]
-        specs = [s for s in self.state.experiments.latest_specs() if s.status == "draft" and (not ids or s.id in ids)]
-        revised = []
-        for spec in specs:
+        work = []
+        for spec in self.state.experiments.latest_specs():
             relevant = [c for c in criticisms if c.target_id in {spec.id, ""}]
-            if not relevant:
-                continue
-            hyp = self.state.hypothesis(spec.hypothesis_id)
-            plan = self.ask(
-                "experiment.design",
-                self._context([hyp] if hyp else [])
-                + f"\n\nRevise experiment {spec.id} (keep the same id and hypothesis) to address:\n"
-                + "\n".join(f"- {c.id} [{c.severity}] {c.description} -> {c.proposed_test}" for c in relevant)
-                + "\n\nCurrent design:\n"
-                + as_yaml(spec.model_dump(exclude=SPEC_EXCLUDE)),
-                ExperimentPlan,
-                {"hypotheses": [spec.hypothesis_id], "mode": "revise", "existing": [spec.model_dump(mode="json")]},
-            )
-            if not plan.experiments:
-                continue
-            candidate = plan.experiments[0]
-            if not candidate.metrics or not candidate.method:
+            if spec.status == "draft" and relevant and (not ids or spec.id in ids):
+                work.append((spec, relevant))
+        if not work:
+            return self.result(task, findings=["No design needed revision"], data={"experiment_ids": []})
+        hypotheses = [h for h in (self.state.hypothesis(i) for i in sorted({s.hypothesis_id for s, _ in work})) if h]
+        blocks = [
+            f"### {spec.id} (tests {spec.hypothesis_id})\nCriticisms:\n"
+            + "\n".join(f"- {c.id} [{c.severity}] {c.description} -> {c.proposed_test}" for c in relevant)
+            + f"\nCurrent design:\n{as_yaml(spec.model_dump(exclude=SPEC_EXCLUDE))}"
+            for spec, relevant in work
+        ]
+        plan = self.ask(
+            "experiment.design",
+            self._context(hypotheses)
+            + "\n\nRevise each experiment below to address its criticisms. Return one entry per experiment and keep its id and hypothesis.\n\n"
+            + "\n\n".join(blocks),
+            ExperimentPlan,
+            {"hypotheses": [s.hypothesis_id for s, _ in work], "mode": "revise", "existing": [s.model_dump(mode="json") for s, _ in work]},
+        )
+        revised = []
+        for (spec, relevant), candidate in zip(work, match_by_id(plan.experiments, [s.id for s, _ in work])):
+            if candidate is None or not candidate.metrics or not candidate.method:
                 continue
             if not any(m.primary for m in candidate.metrics):
                 candidate.metrics[0].primary = True
