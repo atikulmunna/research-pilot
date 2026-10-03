@@ -13,7 +13,7 @@ from typing import Dict, Iterable, List, Protocol
 import requests
 
 from ..state.models import Paper
-from ..state.research_state import paper_keys
+from ..state.research_state import fill_missing, paper_keys
 from .parser import DocumentParser
 
 ATOM = "{http://www.w3.org/2005/Atom}"
@@ -401,18 +401,18 @@ def dedupe(papers: Iterable[Paper]) -> List[Paper]:
     for paper in papers:
         if not paper.title:
             continue
-        keys = paper_keys(paper)
-        match = next((index[k] for k in keys if k in index), None)
+        match = next((index[k] for k in paper_keys(paper) if k in index), None)
         if match is None:
             out.append(paper)
             match = paper
         else:
-            for attr in ("doi", "arxiv_id", "openalex_id", "s2_id", "pdf_url", "abstract", "venue"):
-                if not getattr(match, attr) and getattr(paper, attr):
-                    setattr(match, attr, getattr(paper, attr))
-            match.cited_by_count = max(match.cited_by_count, paper.cited_by_count)
-            if not match.references and paper.references:
-                match.references = paper.references
-        for key in paper_keys(match):
-            index[key] = match
+            _absorb(match, paper)
+        index.update(dict.fromkeys(paper_keys(match), match))
     return out
+
+
+def _absorb(known: Paper, duplicate: Paper) -> None:
+    fill_missing(known, duplicate)
+    known.cited_by_count = max(known.cited_by_count, duplicate.cited_by_count)
+    if not known.references and duplicate.references:
+        known.references = duplicate.references
