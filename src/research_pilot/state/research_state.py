@@ -60,11 +60,17 @@ def paper_keys(paper: Paper) -> Set[str]:
     return keys
 
 
-def merge_paper(known: Paper, duplicate: Paper, found_by: str) -> bool:
-    """Fill gaps in a known paper from a duplicate of it; returns whether anything changed."""
+def fill_missing(known: Paper, duplicate: Paper) -> List[str]:
+    """Copy identifiers and metadata the known paper lacks from a duplicate; returns the fields filled."""
     filled = [attr for attr in MERGEABLE_PAPER_FIELDS if not getattr(known, attr) and getattr(duplicate, attr)]
     for attr in filled:
         setattr(known, attr, getattr(duplicate, attr))
+    return filled
+
+
+def merge_paper(known: Paper, duplicate: Paper, found_by: str) -> bool:
+    """Fill gaps in a known paper from a duplicate of it; returns whether anything changed."""
+    filled = fill_missing(known, duplicate)
     tags = [tag for tag in dict.fromkeys(duplicate.found_by or [found_by]) if tag not in known.found_by]
     known.found_by.extend(tags)
     promoted = duplicate.seed and not known.seed
