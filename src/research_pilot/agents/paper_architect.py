@@ -2,7 +2,7 @@ import re
 from typing import Dict, List, Tuple
 
 from ..services.bibliography import bibliography
-from ..state.models import MANUSCRIPT_SECTIONS, ClaimMap, Draft, TaskEnvelope
+from ..state.models import MANUSCRIPT_SECTIONS, ClaimMap, Draft, ExperimentSpec, TaskEnvelope
 from .base import Agent, clip, paper_digest, ranked_papers
 from .quant_analyst import comparison_table, summary_table
 
@@ -108,17 +108,22 @@ class PaperArchitect(Agent):
         for hyp in self.state.current_hypotheses():
             lines.append(f"- {hyp.key} [{hyp.status}, evidence {self.state.claim_state(f'C{hyp.key}')}] {clip(hyp.statement, 200)}")
             for spec in [s for s in registry.latest_specs() if s.hypothesis_id == hyp.id]:
-                for run in registry.runs_for(spec.key):
-                    interp = self.store.interpretation(run.id)
-                    verdict = interp.verdict if interp else run.status
-                    lines.append(f"    - {run.id} ({spec.key}, {spec.kind}): {verdict}" + (" [synthetic]" if run.synthetic else ""))
-                    if interp:
-                        lines.append(f"      interpretation: {clip(interp.verdict_rationale, 300)}")
+                lines.extend(self._run_lines(spec))
         superseded = [h for h in self.state.hypotheses() if h.status == "superseded"]
         if superseded:
             lines.append("Revised hypotheses (must be reported transparently):")
             lines.extend(f"- {h.key} -> superseded" for h in superseded)
         return "\n".join(lines)
+
+    def _run_lines(self, spec: ExperimentSpec) -> List[str]:
+        lines = []
+        for run in self.state.experiments.runs_for(spec.key):
+            interp = self.store.interpretation(run.id)
+            verdict = interp.verdict if interp else run.status
+            lines.append(f"    - {run.id} ({spec.key}, {spec.kind}): {verdict}" + (" [synthetic]" if run.synthetic else ""))
+            if interp:
+                lines.append(f"      interpretation: {clip(interp.verdict_rationale, 300)}")
+        return lines
 
     def _tables(self) -> List[Tuple[str, str]]:
         registry = self.state.experiments

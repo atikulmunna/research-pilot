@@ -86,6 +86,21 @@ def _dump(data: Any) -> Any:
     return data
 
 
+def _replace_with_retry(tmp: Path, path: Path) -> None:
+    """Move tmp over path. On Windows a replace fails while a reader (the dashboard, antivirus) holds the file open."""
+    for attempt in range(REPLACE_ATTEMPTS - 1):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            time.sleep(0.05 * (attempt + 1))
+    try:
+        os.replace(tmp, path)
+    except PermissionError:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
 class ProjectStore:
     def __init__(self, root: Path):
         self.root = Path(root)
@@ -173,16 +188,7 @@ class ProjectStore:
         tmp = path.with_name(f".{path.name}.{secrets.token_hex(3)}.tmp")
         with self._lock:
             tmp.write_text(text, encoding="utf-8")
-            # On Windows a replace fails while a reader (the dashboard, antivirus) holds the file open.
-            for attempt in range(REPLACE_ATTEMPTS):
-                try:
-                    os.replace(tmp, path)
-                    return
-                except PermissionError:
-                    if attempt == REPLACE_ATTEMPTS - 1:
-                        tmp.unlink(missing_ok=True)
-                        raise
-                    time.sleep(0.05 * (attempt + 1))
+            _replace_with_retry(tmp, path)
 
     def append_jsonl(self, rel: str, record: Dict[str, Any]) -> None:
         path = self.path(rel)
