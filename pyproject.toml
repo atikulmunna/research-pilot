@@ -10,6 +10,9 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
   "anthropic>=1.0",
+  # The SDK's HTTP client (httpx2) fails on brotli-compressed responses with Brotli < 1.2,
+  # which some distributions (Anaconda) ship.
+  "brotli>=1.2.0",
   "typer>=0.12.0",
   "fastapi>=0.115.0",
   "uvicorn>=0.30.0",
