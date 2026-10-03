@@ -145,6 +145,20 @@ def test_openrouter_payload_and_cost(monkeypatch):
     assert out.total_tokens == 5 and out.cost_usd == 0.002
 
 
+def test_openrouter_defaults_max_tokens_and_detects_truncation(monkeypatch):
+    sent = []
+    truncated = {"choices": [{"message": {"content": '{"partial": '}, "finish_reason": "length"}], "usage": {}}
+
+    def fake_post(url, headers=None, json=None, timeout=0):
+        sent.append(json)
+        return FakeResponse(truncated)
+
+    monkeypatch.setattr("research_pilot.llm.providers.requests.post", fake_post)
+    with pytest.raises(ModelTruncated, match="max_tokens=64000"):
+        openrouter().complete("openrouter", "openai/gpt-6-luna", MSG)
+    assert sent[0]["max_tokens"] == 64000 and "temperature" not in sent[0]
+
+
 def test_openrouter_requires_key():
     with pytest.raises(ValueError, match="OPENROUTER_API_KEY"):
         ProviderClient().complete("openrouter", "m", MSG)

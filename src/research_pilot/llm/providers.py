@@ -167,8 +167,7 @@ class ProviderClient:
         payload: Dict[str, Any] = {"model": model, "messages": messages, "usage": {"include": True}}
         if temperature is not None:
             payload["temperature"] = temperature
-        if max_tokens:
-            payload["max_tokens"] = max_tokens
+        payload["max_tokens"] = max_tokens or DEFAULT_MAX_TOKENS
         if effort:
             payload["reasoning"] = {"effort": effort}
         data = self._post_with_retry(
@@ -177,6 +176,8 @@ class ProviderClient:
             payload=payload,
         )
         choices = data.get("choices") or [{}]
+        if choices[0].get("finish_reason") == "length":
+            raise ModelTruncated(f"{model} stopped at max_tokens={payload['max_tokens']} before finishing its answer")
         content = (choices[0].get("message") or {}).get("content")
         if isinstance(content, list):
             content = "".join(part.get("text", "") for part in content if isinstance(part, dict))

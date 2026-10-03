@@ -149,3 +149,26 @@ def test_interrupted_action_is_rerun_on_resume(mock_settings):
     roadmap = store.roadmap()
     assert roadmap[0].status == "done" and store.field_map() is not None
     assert any(a.type == "SEARCH_LITERATURE" for a in roadmap), "the interrupted action's follow-ups were queued"
+
+
+def test_reopen_continues_a_finished_project(mock_settings):
+    settings = mock_settings()
+    store, project, _ = run_project(settings)
+    assert project.status == "completed"
+    state = ResearchState(store, settings)
+    new = state.add_hypothesis(Hypothesis(statement="a new direction found after the first review"))
+
+    orchestrator = Orchestrator(settings, store)
+    orchestrator.reopen()
+    project = orchestrator.run(max_steps=project.step + 20)
+
+    assert "reopen" in [d.kind for d in store.decisions()]
+    assert any(s.hypothesis_id == new.id and s.status == "approved" for s in state.experiments.latest_specs())
+    assert project.status == "completed"
+
+
+def test_reopen_is_a_no_op_for_unfinished_projects(mock_settings):
+    settings = mock_settings()
+    store = create_project(settings, "unfinished topic")
+    Orchestrator(settings, store).reopen()
+    assert store.load_project().status == "created" and store.decisions() == []

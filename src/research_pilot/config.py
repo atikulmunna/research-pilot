@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     llm_lite_provider: str = ""
     llm_lite_model: str = ""
     llm_lite_reasoning_effort: str = "auto"
-    llm_lite_temperature: str = "0.1"
+    llm_lite_temperature: str = ""
     llm_lite_max_tokens: int = 0
 
     # Standard tier: high and medium-high work (gaps, interpretation, planning, drafting).

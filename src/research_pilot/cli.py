@@ -63,8 +63,10 @@ def _progress(event: Dict[str, Any]) -> None:
         typer.echo(f"  ! retrying {event['action_id']}: {event['error'][:150]}")
 
 
-def _run(store: ProjectStore, settings: Settings, max_steps: Optional[int], quiet: bool) -> None:
+def _run(store: ProjectStore, settings: Settings, max_steps: Optional[int], quiet: bool, reopen: bool = False) -> None:
     orchestrator = Orchestrator(settings, store, on_event=None if quiet else _progress)
+    if reopen:
+        orchestrator.reopen()
     project = orchestrator.run(max_steps)
     typer.echo("")
     typer.echo(f"Project {project.id}: {project.status}" + (f" ({project.outcome})" if project.outcome else ""))
@@ -112,10 +114,11 @@ def run(
     project: str = typer.Argument("latest", help="Project id (or prefix, or 'latest')."),
     max_steps: Optional[int] = typer.Option(None, help="Override the total step budget."),
     quiet: bool = typer.Option(False, help="Hide live progress."),
+    reopen: bool = typer.Option(False, "--reopen", help="Continue a finished project: design missing experiments, then plan."),
 ):
     """Run or resume a project."""
     settings = _settings()
-    _run(_open(project, settings), settings, max_steps, quiet)
+    _run(_open(project, settings), settings, max_steps, quiet, reopen)
 
 
 @app.command()
