@@ -79,6 +79,7 @@ class Orchestrator:
         cancel_event: Event | None = None,
     ):
         self.settings = settings
+        self.step_limit = settings.max_steps
         self.store = store
         self.state = ResearchState(store, settings)
         self.router = router or ModelRouter(settings)
@@ -99,7 +100,7 @@ class Orchestrator:
     # ------------------------------------------------------------ main loop
 
     def run(self, max_steps: int | None = None) -> Project:
-        limit = max_steps or self.settings.max_steps
+        self.step_limit = limit = max_steps or self.settings.max_steps
         started = time.monotonic()
         base_seconds = self.project.usage.seconds
         if self.project.status == "completed":
@@ -504,7 +505,7 @@ class Orchestrator:
         runs = self.state.experiments.runs()
         budget = {
             "step": self.project.step,
-            "max_steps": self.settings.max_steps,
+            "max_steps": self.step_limit,
             "runs_left": self.settings.max_experiment_runs - len(runs),
             "cost_spent": round(self.project.usage.cost_usd, 2),
             "cost_cap": self.settings.max_cost_usd,
