@@ -193,7 +193,7 @@ class MockResponder:
         motivated = gaps[:1] + papers[:1]
         mode = c.get("mode", "design")
         if mode == "revise":
-            base = dict(c.get("hypothesis", {}))
+            bases = c.get("hypotheses") or [c.get("hypothesis", {})]
             return {
                 "hypotheses": [
                     {
@@ -205,6 +205,7 @@ class MockResponder:
                         "motivated_by": base.get("motivated_by", motivated),
                         "priority": base.get("priority", 1),
                     }
+                    for base in bases
                 ]
             }
         if mode == "follow_up":

@@ -1,5 +1,5 @@
 from ..state.models import HypothesisSet, TaskEnvelope
-from .base import Agent, as_yaml, clip, paper_digest, ranked_papers
+from .base import Agent, as_yaml, clip, match_by_id, paper_digest, ranked_papers
 
 HYPOTHESIS_FIELDS = {
     "id",
@@ -71,30 +71,37 @@ class HypothesisDesigner(Agent):
         )
 
     def _refine(self, task: TaskEnvelope):
-        """Pre-registration refinement after design critique. Versions are kept and logged."""
+        """Pre-registration refinement after design critique, in one call. Versions are kept and logged."""
         ids = set(task.inputs.get("targets", []))
         criticisms = [c for c in self.state.open_criticisms("hypotheses") if not ids or c.target_id in ids or not c.target_id]
-        targets = [h for h in self.state.current_hypotheses(include_closed=False) if not ids or h.id in ids]
-        revised = []
-        for hyp in targets:
+        work = []
+        for hyp in self.state.current_hypotheses(include_closed=False):
             relevant = [c for c in criticisms if c.target_id in {hyp.id, ""}]
-            if not relevant:
-                continue
-            out = self.ask(
-                "hypothesis.design",
-                self._context()
-                + f"\n\nRevise hypothesis {hyp.id} to address these criticisms (keep the same id):\n"
-                + "\n".join(f"- {c.id} [{c.severity}] {c.description} -> {c.proposed_test}" for c in relevant)
-                + "\n\nCurrent version:\n"
-                + as_yaml(hyp),
-                HypothesisSet,
-                {**self._context_ids(), "mode": "revise", "hypothesis": hyp.model_dump()},
-            )
-            if not out.hypotheses:
+            if relevant and (not ids or hyp.id in ids):
+                work.append((hyp, relevant))
+        if not work:
+            return self.result(task, findings=["No hypothesis needed revision"], data={"hypothesis_ids": []})
+        blocks = [
+            f"### {hyp.id}\nCriticisms:\n"
+            + "\n".join(f"- {c.id} [{c.severity}] {c.description} -> {c.proposed_test}" for c in relevant)
+            + f"\nCurrent version:\n{as_yaml(hyp)}"
+            for hyp, relevant in work
+        ]
+        out = self.ask(
+            "hypothesis.design",
+            self._context()
+            + "\n\nRevise each hypothesis below to address its criticisms. Return one entry per hypothesis and keep its id.\n\n"
+            + "\n\n".join(blocks),
+            HypothesisSet,
+            {**self._context_ids(), "mode": "revise", "hypotheses": [hyp.model_dump() for hyp, _ in work]},
+        )
+        revised = []
+        for (hyp, relevant), candidate in zip(work, match_by_id(out.hypotheses, [hyp.id for hyp, _ in work])):
+            if candidate is None or not candidate.statement:
                 continue
             new = self.state.revise_hypothesis(
                 hyp.id,
-                out.hypotheses[0],
+                candidate,
                 reason="pre-registration refinement addressing " + ", ".join(c.id for c in relevant),
                 triggering_evidence=[c.id for c in relevant],
                 decision_id=task.inputs.get("decision_id", ""),
