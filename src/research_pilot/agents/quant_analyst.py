@@ -72,11 +72,14 @@ def _compare(spec: ExperimentSpec, metric: MetricSpec, baseline: str, method_val
 
 def _comparisons(values: Values, spec: ExperimentSpec, alpha: float) -> List[Comparison]:
     """Method against every baseline on every metric, with Holm correction across all of them."""
+    by_arm: Dict[str, Dict[str, List[float]]] = defaultdict(dict)
+    for (name, arm), vals in values.items():
+        by_arm[arm][name] = vals
     out = []
     for metric in spec.metrics:
-        method_vals = values.get((metric.name, spec.method), [])
+        method_vals = metric.lookup(by_arm[spec.method]) or []
         for baseline in spec.baselines:
-            base_vals = values.get((metric.name, baseline), [])
+            base_vals = metric.lookup(by_arm[baseline]) or []
             if method_vals and base_vals:
                 out.append(_compare(spec, metric, baseline, method_vals, base_vals, alpha))
     for comparison, p_adj in zip(out, stats.holm([c.p_value for c in out])):

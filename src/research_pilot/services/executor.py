@@ -88,10 +88,10 @@ def check_coverage(spec: ExperimentSpec, seeds: List[int], records: List[RunReco
         missing = [s for s in seeds if (arm, s) not in seen]
         if missing:
             problems.append(f"arm '{arm}' missing seeds {missing}")
-    declared = {m.name for m in spec.metrics}
-    reported = {k for r in records for k in r.metrics}
-    if declared - reported:
-        problems.append(f"metrics never reported: {sorted(declared - reported)}")
+    reported = {k: True for r in records for k in r.metrics}
+    missing = [m.name for m in spec.metrics if not m.lookup(reported)]
+    if missing:
+        problems.append(f"metrics never reported: {sorted(missing)}")
     return problems
 
 

@@ -91,3 +91,10 @@ def test_quant_analysis_lower_is_better():
     spec = SPEC.model_copy(update={"metrics": [MetricSpec(name="acc", higher_is_better=False, primary=True)]})
     result = analyze_run(run_with([0.10, 0.11, 0.12], [0.30, 0.31, 0.32]), spec, 0.05)
     assert result.comparisons[0].direction_ok and result.comparisons[0].diff < 0
+
+
+def test_metrics_match_by_identifier_when_names_carry_descriptions():
+    spec = SPEC.model_copy(update={"metrics": [MetricSpec(name="acc (held-out, per replicate)", primary=True)]})
+    result = analyze_run(run_with([0.80, 0.81, 0.82], [0.70, 0.71, 0.72]), spec, 0.05)
+    assert result.comparisons and result.comparisons[0].primary and result.comparisons[0].significant
+    assert not [a for a in result.anomalies if a.startswith("coverage: metrics never reported")]
