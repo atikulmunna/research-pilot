@@ -132,3 +132,33 @@ def test_decisions_are_logged(state):
     decision = state.log_decision("plan", "Run E1", "highest priority", alternatives=["search literature"])
     assert decision.id == "D001"
     assert state.store.decisions()[0].alternatives_considered == ["search literature"]
+
+
+def test_writes_retry_while_the_target_is_locked(state, monkeypatch):
+    from research_pilot.state import store as store_module
+
+    real_replace, calls = store_module.os.replace, []
+
+    def locked_twice(src, dst):
+        calls.append(dst)
+        if len(calls) <= 2:
+            raise PermissionError("held open by a reader")
+        real_replace(src, dst)
+
+    monkeypatch.setattr(store_module.os, "replace", locked_twice)
+    monkeypatch.setattr(store_module.time, "sleep", lambda _: None)
+    state.store.write_text("notes/retry.txt", "saved")
+    assert state.store.read_text("notes/retry.txt") == "saved" and len(calls) == 3
+
+
+def test_a_persistent_lock_raises_and_leaves_no_temp_file(state, monkeypatch):
+    from research_pilot.state import store as store_module
+
+    def always_locked(src, dst):
+        raise PermissionError("held open by a reader")
+
+    monkeypatch.setattr(store_module.os, "replace", always_locked)
+    monkeypatch.setattr(store_module.time, "sleep", lambda _: None)
+    with pytest.raises(PermissionError):
+        state.store.write_text("notes/locked.txt", "lost")
+    assert not list(state.store.path("notes").glob("*.tmp"))
