@@ -447,10 +447,19 @@ class HypothesisSet(Model):
 
 
 class MetricSpec(Model):
-    name: Text = ""
+    name: Text = Field("", description="Short snake_case identifier; the experiment code reports it verbatim as the metric key")
     higher_is_better: Flag = True
     primary: Flag = False
     min_effect: float | None = Field(None, description="Smallest difference that matters in practice, or null")
+
+    @property
+    def key(self) -> str:
+        """The leading identifier of the name, without any parenthetical description."""
+        return self.name.split(" (")[0].strip()
+
+    def lookup(self, reported: Dict[str, Any]) -> Any:
+        """Find this metric in a mapping keyed by reported names (full name first, then identifier)."""
+        return reported.get(self.name, reported.get(self.key))
 
 
 EXPERIMENT_KINDS = ("primary", "ablation", "robustness", "sensitivity", "baseline_reproduction", "validation")
