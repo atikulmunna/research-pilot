@@ -293,6 +293,17 @@ class MockLiteratureProvider:
         )
 
 
+DOI_PATTERN = re.compile(r"^(https?://doi\.org/)?10\.\d{4,}/", flags=re.IGNORECASE)
+ARXIV_PATTERN = re.compile(r"^(?:arxiv:)?(\d{4}\.\d{4,5})(v\d+)?$", flags=re.IGNORECASE)
+PROVIDER_ALIASES = {"s2": "semantic_scholar", "semanticscholar": "semantic_scholar"}
+PROVIDER_FACTORIES = {
+    "openalex": lambda s: OpenAlexProvider(api_key=s.openalex_api_key, mailto=s.openalex_mailto),
+    "semantic_scholar": lambda s: SemanticScholarProvider(api_key=s.semantic_scholar_api_key),
+    "arxiv": lambda s: ArxivProvider(),
+    "mock": lambda s: MockLiteratureProvider(),
+}
+
+
 class LiteratureSearch:
     def __init__(self, providers: Iterable[LiteratureProvider], parser: DocumentParser | None = None):
         self.providers = list(providers)
@@ -302,17 +313,13 @@ class LiteratureSearch:
     @classmethod
     def from_settings(cls, settings) -> "LiteratureSearch":
         providers: List[LiteratureProvider] = []
-        for name in [p.strip().lower() for p in settings.literature_providers.split(",") if p.strip()]:
-            if name == "openalex":
-                providers.append(OpenAlexProvider(api_key=settings.openalex_api_key, mailto=settings.openalex_mailto))
-            elif name in {"semantic_scholar", "s2", "semanticscholar"}:
-                providers.append(SemanticScholarProvider(api_key=settings.semantic_scholar_api_key))
-            elif name == "arxiv":
-                providers.append(ArxivProvider())
-            elif name == "mock":
-                providers.append(MockLiteratureProvider())
-            else:
+        for raw in settings.literature_providers.split(","):
+            name = PROVIDER_ALIASES.get(raw.strip().lower(), raw.strip().lower())
+            if not name:
+                continue
+            if name not in PROVIDER_FACTORIES:
                 raise ValueError(f"Unknown literature provider: {name}")
+            providers.append(PROVIDER_FACTORIES[name](settings))
         return cls(providers)
 
     @property
@@ -341,32 +348,34 @@ class LiteratureSearch:
         return out
 
     def resolve(self, identifier: str) -> Paper | None:
+        """Find a seed paper by DOI, arXiv id or, failing that, by title search."""
         ident = identifier.strip()
-        try:
-            if re.match(r"^(https?://doi\.org/)?10\.\d{4,}/", ident, flags=re.IGNORECASE):
-                for provider in self.providers:
-                    if isinstance(provider, OpenAlexProvider):
-                        return provider.resolve_doi(ident)
-            arxiv = re.match(r"^(?:arxiv:)?(\d{4}\.\d{4,5})(v\d+)?$", ident, flags=re.IGNORECASE)
-            if arxiv:
-                for provider in self.providers:
-                    try:
-                        if isinstance(provider, ArxivProvider):
-                            found = provider.resolve(arxiv.group(1))
-                        elif isinstance(provider, OpenAlexProvider):
-                            found = provider.resolve_doi(f"10.48550/arxiv.{arxiv.group(1)}")
-                        else:
-                            continue
-                    except Exception as exc:
-                        self.warnings.append(f"{provider.name} could not resolve seed '{ident}': {type(exc).__name__}")
-                        continue
-                    if found is not None:
-                        return found
-        except Exception as exc:
-            self.warnings.append(f"could not resolve seed paper '{ident}': {type(exc).__name__}")
-            return None
+        if DOI_PATTERN.match(ident):
+            openalex = next((p for p in self.providers if isinstance(p, OpenAlexProvider)), None)
+            if openalex is not None:
+                return self._try_resolve(openalex, lambda: openalex.resolve_doi(ident), ident)
+        arxiv = ARXIV_PATTERN.match(ident)
+        if arxiv:
+            for provider, lookup in self._arxiv_lookups(arxiv.group(1)):
+                found = self._try_resolve(provider, lookup, ident)
+                if found is not None:
+                    return found
         hits = self.search(ident, 1)
         return hits[0] if hits else None
+
+    def _arxiv_lookups(self, arxiv_id: str):
+        for provider in self.providers:
+            if isinstance(provider, ArxivProvider):
+                yield provider, lambda p=provider: p.resolve(arxiv_id)
+            elif isinstance(provider, OpenAlexProvider):
+                yield provider, lambda p=provider: p.resolve_doi(f"10.48550/arxiv.{arxiv_id}")
+
+    def _try_resolve(self, provider: LiteratureProvider, lookup, ident: str) -> Paper | None:
+        try:
+            return lookup()
+        except Exception as exc:
+            self.warnings.append(f"{provider.name} could not resolve seed '{ident}': {type(exc).__name__}")
+            return None
 
     def fulltext(self, paper: Paper, max_chars: int = 30000) -> str:
         if not paper.pdf_url or paper.synthetic:
