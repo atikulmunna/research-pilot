@@ -10,6 +10,7 @@ records decisions, and decides when the work is complete.
 import logging
 import time
 from dataclasses import asdict
+from datetime import datetime
 from threading import Event
 from typing import Any, Callable, Dict, List
 
@@ -33,7 +34,9 @@ SIGNIFICANT = {
     "SEARCH_LITERATURE",
 }
 log = logging.getLogger(__name__)
-# Share of the cost or token budget after which the manuscript is written before anything else.
+# Cost kept in reserve so the manuscript can still be drafted and reviewed (about one draft and one review).
+ENDGAME_RESERVE_USD = 0.75
+# Share of the token budget after which the manuscript is written before anything else.
 ENDGAME_SHARE = 0.7
 
 
@@ -607,16 +610,26 @@ class Orchestrator:
             return f"time budget {self.settings.max_seconds}s reached"
         return ""
 
+    def _manuscript_current(self) -> bool:
+        """True when a manuscript exists and no experiment finished after it was drafted."""
+        draft = self.store.path("paper/manuscript/draft.yaml")
+        if not self.store.manuscript() or not draft.exists():
+            return False
+        drafted = draft.stat().st_mtime
+        finished = [r.completed_at for r in self.state.experiments.runs() if r.status == "completed" and r.completed_at]
+        return all(datetime.fromisoformat(stamp).timestamp() <= drafted for stamp in finished)
+
     def _maybe_endgame(self, limit: int) -> None:
-        if self.store.manuscript() or self._pending("WRITE_PAPER") or self._pending("REQUEST_REVIEW"):
+        if self._manuscript_current() or self._pending("WRITE_PAPER") or self._pending("REQUEST_REVIEW"):
             return
         usage, s = self.project.usage, self.settings
+        missing = "no manuscript yet" if not self.store.manuscript() else "the manuscript predates the latest results"
         if limit - self.project.step <= 2:
-            reason = f"{limit - self.project.step} step(s) left and no manuscript yet"
-        elif s.max_cost_usd and usage.cost_usd >= ENDGAME_SHARE * s.max_cost_usd:
-            reason = f"${usage.cost_usd:.2f} of the ${s.max_cost_usd:.2f} cost budget spent and no manuscript yet"
+            reason = f"{limit - self.project.step} step(s) left and {missing}"
+        elif s.max_cost_usd and s.max_cost_usd - usage.cost_usd <= ENDGAME_RESERVE_USD:
+            reason = f"${s.max_cost_usd - usage.cost_usd:.2f} of the ${s.max_cost_usd:.2f} cost budget left and {missing}"
         elif s.max_total_tokens and usage.total_tokens >= ENDGAME_SHARE * s.max_total_tokens:
-            reason = f"{usage.total_tokens} of {s.max_total_tokens} budgeted tokens used and no manuscript yet"
+            reason = f"{usage.total_tokens} of {s.max_total_tokens} budgeted tokens used and {missing}"
         else:
             return
         self.state.log_decision(
