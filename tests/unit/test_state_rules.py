@@ -32,6 +32,15 @@ def test_project_layout_matches_plan(state):
     assert ProjectStore.resolve_id(state.settings.workspace_dir, "latest") == root.name
 
 
+def test_project_and_run_ids_cannot_escape_the_workspace(state):
+    workspace = state.settings.workspace_dir
+    for bad in ("../outside", "..\outside", "a/b", "Upper", "x" * 90):
+        with pytest.raises(FileNotFoundError, match="Invalid project id"):
+            ProjectStore.open(workspace, bad)
+    assert ProjectStore.open(workspace, state.store.root.name).root == state.store.root
+    assert state.experiments.run("../../outside") is None
+
+
 def test_papers_need_a_traceable_source(state):
     added = state.add_papers([paper("Real paper"), Paper(title="Invented paper", source="llm")], found_by="q")
     assert [p.id for p in added] == ["P001"]

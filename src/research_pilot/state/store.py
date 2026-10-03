@@ -1,6 +1,7 @@
 """On-disk project workspace, laid out as the shared research state described in the plan."""
 
 import json
+import logging
 import os
 import re
 import secrets
@@ -33,6 +34,8 @@ from .models import (
 )
 
 M = TypeVar("M", bound=BaseModel)
+PROJECT_ID = re.compile(r"[a-z0-9][a-z0-9-]{0,80}")
+log = logging.getLogger(__name__)
 _Loader = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
 _Dumper = getattr(yaml, "CSafeDumper", yaml.SafeDumper)
 
@@ -121,8 +124,8 @@ class ProjectStore:
         for path in base.glob("*/project.yaml"):
             try:
                 out.append(Project.model_validate(load_yaml(path.read_text(encoding="utf-8"))))
-            except Exception:
-                continue
+            except Exception as exc:
+                log.warning("skipping unreadable project %s: %s", path.parent.name, exc)
         out.sort(key=lambda p: p.updated_at, reverse=True)
         return out
 
@@ -134,6 +137,8 @@ class ProjectStore:
             if not projects:
                 raise FileNotFoundError("No projects found.")
             return projects[0].id
+        if not PROJECT_ID.fullmatch(ref):
+            raise FileNotFoundError(f"Invalid project id: {project_ref!r}")
         if (Path(workspace) / ref / "project.yaml").exists():
             return ref
         matches = [p.id for p in cls.list_projects(workspace) if p.id.startswith(ref)]

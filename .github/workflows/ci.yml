@@ -29,6 +29,9 @@ jobs:
       - name: Secret hygiene scan
         run: python scripts/scan_secrets.py
 
+      - name: Lint
+        run: ruff check src tests
+
       - name: Run tests
         run: pytest -q
 

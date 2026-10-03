@@ -14,7 +14,7 @@ RETRY_STATUSES = {429, 500, 502, 503, 504}
 
 # Current Claude models take adaptive thinking plus output_config.effort. Haiku 4.5 and
 # pre-4.6 models instead take an explicit thinking budget and no effort parameter.
-LEGACY_THINKING_MARKERS = ("haiku", "-3-", "-4-0", "-4-1", "-4-5")
+LEGACY_THINKING_MARKERS = ("haiku", "-4-5")
 LEGACY_THINKING_BUDGET = {"medium": 2048, "high": 8192}
 # Models that accept server-side refusal fallbacks in the "default" form.
 FALLBACK_MODELS = ("claude-fable-5-1", "claude-opus-5-5", "claude-opus-5", "claude-sonnet-5-5")
