@@ -5,7 +5,7 @@ from typing import Dict, List, Tuple
 
 from ..services import stats
 from ..services.executor import check_coverage
-from ..state.models import ArmSummary, Comparison, ExperimentRun, ExperimentSpec, QuantResult, StatsSummary, TaskEnvelope
+from ..state.models import ArmSummary, Comparison, ExperimentRun, ExperimentSpec, MetricSpec, QuantResult, StatsSummary, TaskEnvelope
 from .base import Agent
 
 
@@ -13,102 +13,121 @@ def _fmt(value: float | None, digits: int = 4) -> str:
     return "n/a" if value is None else f"{value:.{digits}f}"
 
 
-def analyze_run(run: ExperimentRun, spec: ExperimentSpec, alpha: float) -> QuantResult:
-    values: Dict[Tuple[str, str], List[float]] = defaultdict(list)
-    seeds_by: Dict[Tuple[str, str], List[int]] = defaultdict(list)
+Values = Dict[Tuple[str, str], List[float]]
+
+
+def _group_values(run: ExperimentRun) -> Values:
+    values: Values = defaultdict(list)
     for record in run.records:
         for metric, value in record.metrics.items():
             values[(metric, record.arm)].append(value)
-            seeds_by[(metric, record.arm)].append(record.seed)
+    return values
 
-    summaries: List[ArmSummary] = []
+
+def _summaries(values: Values) -> List[ArmSummary]:
+    out = []
     for (metric, arm), vals in sorted(values.items()):
         low, high = stats.mean_ci(vals)
-        summaries.append(
-            ArmSummary(metric=metric, arm=arm, n=len(vals), mean=stats.mean(vals), std=stats.stdev(vals), ci_low=low, ci_high=high, min=min(vals), max=max(vals))
-        )
+        out.append(ArmSummary(metric=metric, arm=arm, n=len(vals), mean=stats.mean(vals), std=stats.stdev(vals), ci_low=low, ci_high=high, min=min(vals), max=max(vals)))
+    return out
 
+
+def _stable_without_best_seed(method_vals: List[float], base_vals: List[float], metric: MetricSpec, alpha: float) -> bool | None:
+    """Does the improvement survive dropping the method's single best seed?"""
+    if len(method_vals) < 3:
+        return None
+    trimmed = list(method_vals)
+    trimmed.remove(max(method_vals) if metric.higher_is_better else min(method_vals))
+    loo = stats.welch(trimmed, base_vals)
+    sign = 1.0 if metric.higher_is_better else -1.0
+    return loo["p_value"] is not None and loo["p_value"] < alpha and sign * loo["diff"] > 0
+
+
+def _compare(spec: ExperimentSpec, metric: MetricSpec, baseline: str, method_vals: List[float], base_vals: List[float], alpha: float) -> Comparison:
+    test = stats.welch(method_vals, base_vals)
+    diff = test["diff"]
+    base_mean = stats.mean(base_vals)
+    g = stats.hedges_g(method_vals, base_vals)
+    practical = abs(diff) >= metric.min_effect if metric.min_effect is not None else g is not None and abs(g) >= 0.5
     primary = spec.primary_metric()
-    comparisons: List[Comparison] = []
-    anomalies: List[str] = []
+    return Comparison(
+        metric=metric.name,
+        method=spec.method,
+        baseline=baseline,
+        higher_is_better=metric.higher_is_better,
+        primary=primary is not None and metric.name == primary.name,
+        diff=diff,
+        rel_diff=(diff / abs(base_mean)) if base_mean else None,
+        ci_low=test["ci_low"],
+        ci_high=test["ci_high"],
+        t=test["t"],
+        df=test["df"],
+        p_value=test["p_value"],
+        hedges_g=g,
+        direction_ok=(diff if metric.higher_is_better else -diff) > 0,
+        practically_significant=practical,
+        stable_without_best_seed=_stable_without_best_seed(method_vals, base_vals, metric, alpha),
+    )
+
+
+def _comparisons(values: Values, spec: ExperimentSpec, alpha: float) -> List[Comparison]:
+    """Method against every baseline on every metric, with Holm correction across all of them."""
+    out = []
     for metric in spec.metrics:
         method_vals = values.get((metric.name, spec.method), [])
-        if not method_vals:
-            continue
         for baseline in spec.baselines:
             base_vals = values.get((metric.name, baseline), [])
-            if not base_vals:
-                continue
-            test = stats.welch(method_vals, base_vals)
-            sign = 1.0 if metric.higher_is_better else -1.0
-            diff = test["diff"]
-            base_mean = stats.mean(base_vals)
-            g = stats.hedges_g(method_vals, base_vals)
-            if metric.min_effect is not None:
-                practical = abs(diff) >= metric.min_effect
-            else:
-                practical = g is not None and abs(g) >= 0.5
-            stable = None
-            if len(method_vals) >= 3:
-                best = max(method_vals) if metric.higher_is_better else min(method_vals)
-                trimmed = list(method_vals)
-                trimmed.remove(best)
-                loo = stats.welch(trimmed, base_vals)
-                stable = loo["p_value"] is not None and loo["p_value"] < alpha and sign * loo["diff"] > 0
-            comparisons.append(
-                Comparison(
-                    metric=metric.name,
-                    method=spec.method,
-                    baseline=baseline,
-                    higher_is_better=metric.higher_is_better,
-                    primary=primary is not None and metric.name == primary.name,
-                    diff=diff,
-                    rel_diff=(diff / abs(base_mean)) if base_mean else None,
-                    ci_low=test["ci_low"],
-                    ci_high=test["ci_high"],
-                    t=test["t"],
-                    df=test["df"],
-                    p_value=test["p_value"],
-                    hedges_g=g,
-                    direction_ok=sign * diff > 0,
-                    practically_significant=practical,
-                    stable_without_best_seed=stable,
-                )
-            )
-
-    adjusted = stats.holm([c.p_value for c in comparisons])
-    for comparison, p_adj in zip(comparisons, adjusted):
+            if method_vals and base_vals:
+                out.append(_compare(spec, metric, baseline, method_vals, base_vals, alpha))
+    for comparison, p_adj in zip(out, stats.holm([c.p_value for c in out])):
         comparison.p_adjusted = p_adj
         comparison.significant = p_adj is not None and p_adj < alpha
+    return out
 
-    for summary in summaries:
-        if summary.n < 3:
-            anomalies.append(f"{summary.arm}/{summary.metric}: only {summary.n} seed(s); too few for reliable inference")
-        cv = stats.coefficient_of_variation(values[(summary.metric, summary.arm)])
-        if cv is not None and cv > 0.1:
-            anomalies.append(f"{summary.arm}/{summary.metric}: unstable across seeds (CV {cv:.2f})")
-        vals = values[(summary.metric, summary.arm)]
-        if len(set(vals)) == 1 and len(vals) > 1:
-            anomalies.append(f"{summary.arm}/{summary.metric}: identical value on every seed; check that the seed is actually used")
-        if summary.max == 1.0 or summary.min == 0.0:
-            anomalies.append(f"{summary.arm}/{summary.metric}: perfect or zero score observed; check for evaluation leakage")
-    for comparison in comparisons:
-        label = f"{comparison.method} vs {comparison.baseline} on {comparison.metric}"
-        if comparison.hedges_g is not None and abs(comparison.hedges_g) > 3:
-            anomalies.append(f"{label}: very large effect (g={comparison.hedges_g:.1f}); rule out leakage or an evaluation bug")
-        if comparison.p_value is not None and comparison.p_value < alpha and not comparison.significant:
-            anomalies.append(f"{label}: significant before but not after Holm correction for {len(comparisons)} comparisons")
-        if comparison.significant and comparison.stable_without_best_seed is False:
-            anomalies.append(f"{label}: improvement depends on the single best seed")
-        if comparison.significant and comparison.direction_ok and not comparison.practically_significant:
-            anomalies.append(f"{label}: statistically significant but below the practical-significance threshold")
-    anomalies.extend(f"coverage: {p}" for p in check_coverage(spec, run.seeds, run.records))
+
+def _arm_anomalies(summary: ArmSummary, vals: List[float]) -> List[str]:
+    label = f"{summary.arm}/{summary.metric}"
+    out = []
+    if summary.n < 3:
+        out.append(f"{label}: only {summary.n} seed(s); too few for reliable inference")
+    cv = stats.coefficient_of_variation(vals)
+    if cv is not None and cv > 0.1:
+        out.append(f"{label}: unstable across seeds (CV {cv:.2f})")
+    if len(set(vals)) == 1 and len(vals) > 1:
+        out.append(f"{label}: identical value on every seed; check that the seed is actually used")
+    if summary.max == 1.0 or summary.min == 0.0:
+        out.append(f"{label}: perfect or zero score observed; check for evaluation leakage")
+    return out
+
+
+def _comparison_anomalies(comparison: Comparison, total: int, alpha: float) -> List[str]:
+    label = f"{comparison.method} vs {comparison.baseline} on {comparison.metric}"
+    out = []
+    if comparison.hedges_g is not None and abs(comparison.hedges_g) > 3:
+        out.append(f"{label}: very large effect (g={comparison.hedges_g:.1f}); rule out leakage or an evaluation bug")
+    if comparison.p_value is not None and comparison.p_value < alpha and not comparison.significant:
+        out.append(f"{label}: significant before but not after Holm correction for {total} comparisons")
+    if comparison.significant and comparison.stable_without_best_seed is False:
+        out.append(f"{label}: improvement depends on the single best seed")
+    if comparison.significant and comparison.direction_ok and not comparison.practically_significant:
+        out.append(f"{label}: statistically significant but below the practical-significance threshold")
+    return out
+
+
+def analyze_run(run: ExperimentRun, spec: ExperimentSpec, alpha: float) -> QuantResult:
+    values = _group_values(run)
+    summaries = _summaries(values)
+    comparisons = _comparisons(values, spec, alpha)
+    anomalies = [a for s in summaries for a in _arm_anomalies(s, values[(s.metric, s.arm)])]
+    anomalies += [a for c in comparisons for a in _comparison_anomalies(c, len(comparisons), alpha)]
+    anomalies += [f"coverage: {p}" for p in check_coverage(spec, run.seeds, run.records)]
     if run.synthetic:
         anomalies.append("Results are synthetic (simulated execution or mock-generated code); they are not evidence.")
 
     constraints = [
         f"n = {min((s.n for s in summaries), default=0)} to {max((s.n for s in summaries), default=0)} seeds per arm; p-values use Welch's t-test with Holm correction across {len(comparisons)} comparisons (alpha {alpha}).",
     ]
+    primary = spec.primary_metric()
     if primary is not None:
         constraints.append(f"Only '{primary.name}' is the pre-registered primary metric; other metrics are secondary.")
     return QuantResult(
