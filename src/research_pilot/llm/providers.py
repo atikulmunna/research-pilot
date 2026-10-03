@@ -19,7 +19,8 @@ LEGACY_THINKING_BUDGET = {"medium": 2048, "high": 8192}
 # Models that accept server-side refusal fallbacks in the "default" form.
 FALLBACK_MODELS = ("claude-fable-5-1", "claude-opus-5-5", "claude-opus-5", "claude-sonnet-5-5")
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
-DEFAULT_MAX_TOKENS = 16000
+# Streaming lets long, thinking-heavy answers finish without HTTP timeouts.
+DEFAULT_MAX_TOKENS = 64000
 
 
 @dataclass
@@ -35,6 +36,10 @@ class Completion:
 
 
 class ModelRefusal(RuntimeError):
+    pass
+
+
+class ModelTruncated(RuntimeError):
     pass
 
 
@@ -109,20 +114,22 @@ class ProviderClient:
             params["system"] = system
         client = self.anthropic_client()
         # The 1.x SDK no longer accepts sampling parameters, so temperature is not sent to Anthropic.
+        open_stream, extra = client.messages.stream, {}
         if uses_thinking_budget(model):
             budget = LEGACY_THINKING_BUDGET.get(effort or "")
             if budget:
                 params["thinking"] = {"type": "enabled", "budget_tokens": budget}
                 params["max_tokens"] = max(params["max_tokens"], budget + 4096)
-            response = client.messages.create(**params)
         else:
             params["thinking"] = {"type": "adaptive"}
             if effort:
                 params["output_config"] = {"effort": effort}
             if model in FALLBACK_MODELS:
-                response = client.beta.messages.create(**params, betas=[FALLBACK_BETA], fallbacks="default")
-            else:
-                response = client.messages.create(**params)
+                open_stream, extra = client.beta.messages.stream, {"betas": [FALLBACK_BETA], "fallbacks": "default"}
+        with open_stream(**params, **extra) as stream:
+            response = stream.get_final_message()
+        if response.stop_reason == "max_tokens":
+            raise ModelTruncated(f"{model} stopped at max_tokens={params['max_tokens']} before finishing its answer")
         if response.stop_reason == "refusal":
             details = getattr(response, "stop_details", None)
             category = getattr(details, "category", None) if details else None

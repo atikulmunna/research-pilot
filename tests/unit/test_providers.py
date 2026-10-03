@@ -6,7 +6,7 @@ import requests
 from anthropic.resources.beta.messages import Messages as BetaMessages
 from anthropic.resources.messages import Messages as StableMessages
 
-from research_pilot.llm.providers import FALLBACK_BETA, ModelRefusal, ProviderClient
+from research_pilot.llm.providers import FALLBACK_BETA, ModelRefusal, ModelTruncated, ProviderClient
 
 MSG = [{"role": "system", "content": "be brief"}, {"role": "user", "content": "hi"}]
 
@@ -24,21 +24,35 @@ def claude_response(text="ok", stop_reason="end_turn", model="claude-opus-5-5"):
     )
 
 
+class FakeStream:
+    def __init__(self, response):
+        self.response = response
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def get_final_message(self):
+        return self.response
+
+
 class FakeAnthropic:
     def __init__(self, response=None):
         self.calls = []
         response = response or claude_response()
-        self.messages = SimpleNamespace(create=lambda **kw: self._record("stable", kw, response))
-        self.beta = SimpleNamespace(messages=SimpleNamespace(create=lambda **kw: self._record("beta", kw, response)))
+        self.messages = SimpleNamespace(stream=lambda **kw: self._record("stable", kw, response))
+        self.beta = SimpleNamespace(messages=SimpleNamespace(stream=lambda **kw: self._record("beta", kw, response)))
 
     def _record(self, surface, params, response):
         # Reject arguments the real SDK method would reject, so signature drift fails here.
-        method = BetaMessages.create if surface == "beta" else StableMessages.create
+        method = BetaMessages.stream if surface == "beta" else StableMessages.stream
         unknown = set(params) - set(inspect.signature(method).parameters)
         if unknown:
-            raise TypeError(f"{surface} messages.create() got unexpected arguments {sorted(unknown)}")
+            raise TypeError(f"{surface} messages.stream() got unexpected arguments {sorted(unknown)}")
         self.calls.append((surface, params))
-        return response
+        return FakeStream(response)
 
 
 def test_opus_uses_adaptive_thinking_effort_and_default_fallbacks():
@@ -49,7 +63,7 @@ def test_opus_uses_adaptive_thinking_effort_and_default_fallbacks():
     assert params["betas"] == [FALLBACK_BETA] and params["fallbacks"] == "default"
     assert params["thinking"] == {"type": "adaptive"} and params["output_config"] == {"effort": "high"}
     assert params["system"] == "be brief" and params["messages"] == [{"role": "user", "content": "hi"}]
-    assert "temperature" not in params and params["max_tokens"] == 16000
+    assert "temperature" not in params and params["max_tokens"] == 64000
     assert out.text == "ok" and out.prompt_tokens == 110 and out.completion_tokens == 40 and out.total_tokens == 150
 
 
@@ -71,6 +85,12 @@ def test_models_without_fallback_support_use_the_stable_endpoint():
     surface, params = fake.calls[0]
     assert surface == "stable" and "fallbacks" not in params
     assert params["output_config"] == {"effort": "medium"}
+
+
+def test_truncated_answer_raises():
+    fake = FakeAnthropic(claude_response(text='{"partial": ', stop_reason="max_tokens"))
+    with pytest.raises(ModelTruncated, match="max_tokens=64000"):
+        ProviderClient(anthropic_client=fake).complete("anthropic", "claude-opus-5-5", MSG)
 
 
 def test_refusal_raises():
