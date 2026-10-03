@@ -1,6 +1,6 @@
 import math
 import re
-from typing import Dict, List
+from typing import Any, Dict, List
 
 from ..services.literature import dedupe
 from ..state.models import ClaimVerification, ExtractionBatch, LiteratureClustering, Paper, QueryPlan, TaskEnvelope, now_iso
@@ -12,6 +12,15 @@ TARGETED_MIN_NEW = 6
 
 def _terms(text: str) -> set:
     return set(_WORD.findall((text or "").lower()))
+
+
+def _extraction_block(paper: Paper, fulltext: str | None) -> str:
+    text = fulltext or paper.abstract or "(no abstract available)"
+    limit = 6000 if fulltext is not None else 1800
+    return (
+        f"### {paper.id}\nTitle: {paper.title}\nYear: {paper.year or 'n.d.'} | Venue: {paper.venue or 'unknown'}\n"
+        f"Text ({'full text excerpt' if fulltext is not None else 'abstract'}):\n{clip(text, limit)}"
+    )
 
 
 class LiteratureIntelligence(Agent):
@@ -111,43 +120,53 @@ class LiteratureIntelligence(Agent):
     def _chase_citations(self) -> int:
         lit_map = self.store.literature_map()
         expanded = set(lit_map.get("expanded", []))
-        papers = self.state.papers()
-        seeds = [p for p in papers if p.seed and p.id not in expanded]
-        seeds += sorted((p for p in papers if p.id not in expanded and not p.seed), key=lambda p: p.cited_by_count, reverse=True)
-        seeds = seeds[: self.settings.literature_citation_seed_k]
         count = 0
-        for paper in seeds:
-            budget = self.settings.literature_max_papers - len(self.state.papers())
-            links = self.deps.literature.expand(paper, self.settings.literature_citation_limit)
-            for relation, related in links.items():
-                for other in related:
-                    other.found_by = [f"{'reference of' if relation == 'references' else 'cites'} {paper.id}"]
-                if budget > 0:
-                    new = self.state.add_papers(related[:budget], found_by=f"citations of {paper.id}")
-                    count += len(new)
-                    budget -= len(new)
-                for other in related:
-                    stored = self.state.find_paper(other)
-                    if stored is None:
-                        continue
-                    if relation == "references":
-                        self.state.add_citation(paper.id, stored.id)
-                    else:
-                        self.state.add_citation(stored.id, paper.id)
+        for paper in self._citation_seeds(expanded):
+            count += self._expand(paper)
             expanded.add(paper.id)
-
-        index = {p.openalex_id.rsplit("/", 1)[-1]: p.id for p in self.state.papers() if p.openalex_id}
-        for paper in self.state.papers():
-            for ref in paper.references:
-                target = index.get(ref.rsplit("/", 1)[-1])
-                if target:
-                    self.state.add_citation(paper.id, target)
+        self._link_known_references()
 
         lit_map["expanded"] = sorted(expanded)
         self.store.save_literature_map(lit_map)
         edges = [{"from": e.source, "to": e.target} for e in self.state.graph.edges if e.relation == "cites"]
         self.store.save_citation_graph({"edges": edges, "expanded": sorted(expanded)})
         return count
+
+    def _citation_seeds(self, expanded: set) -> List[Paper]:
+        papers = self.state.papers()
+        seeds = [p for p in papers if p.seed and p.id not in expanded]
+        seeds += sorted((p for p in papers if p.id not in expanded and not p.seed), key=lambda p: p.cited_by_count, reverse=True)
+        return seeds[: self.settings.literature_citation_seed_k]
+
+    def _expand(self, paper: Paper) -> int:
+        """Add a paper's references and citing papers within the paper budget; returns how many were new."""
+        budget = self.settings.literature_max_papers - len(self.state.papers())
+        added = 0
+        for relation, related in self.deps.literature.expand(paper, self.settings.literature_citation_limit).items():
+            for other in related:
+                other.found_by = [f"{'reference of' if relation == 'references' else 'cites'} {paper.id}"]
+            if budget > 0:
+                new = self.state.add_papers(related[:budget], found_by=f"citations of {paper.id}")
+                added += len(new)
+                budget -= len(new)
+            self._link_citations(paper, relation, related)
+        return added
+
+    def _link_citations(self, paper: Paper, relation: str, related: List[Paper]) -> None:
+        for other in related:
+            stored = self.state.find_paper(other)
+            if stored is None:
+                continue
+            citing, cited = (paper.id, stored.id) if relation == "references" else (stored.id, paper.id)
+            self.state.add_citation(citing, cited)
+
+    def _link_known_references(self) -> None:
+        """Add citation edges for references that point at papers already in the corpus."""
+        index = {p.openalex_id.rsplit("/", 1)[-1]: p.id for p in self.state.papers() if p.openalex_id}
+        links = ((p.id, index.get(ref.rsplit("/", 1)[-1])) for p in self.state.papers() for ref in p.references)
+        for source, target in links:
+            if target:
+                self.state.add_citation(source, target)
 
     def _fulltexts(self) -> Dict[str, str]:
         k = self.settings.literature_fulltext_top_k
@@ -166,39 +185,35 @@ class LiteratureIntelligence(Agent):
     def _extract(self, fulltexts: Dict[str, str]) -> int:
         pending = [p for p in self.state.papers() if not p.extracted]
         size = max(1, self.settings.literature_extraction_batch)
-        done = 0
         for start in range(0, len(pending), size):
             batch = pending[start : start + size]
-            blocks = []
+            extractions = self._extract_batch(batch, fulltexts)
             for paper in batch:
-                text = fulltexts.get(paper.id) or paper.abstract or "(no abstract available)"
-                limit = 6000 if paper.id in fulltexts else 1800
-                blocks.append(
-                    f"### {paper.id}\nTitle: {paper.title}\nYear: {paper.year or 'n.d.'} | Venue: {paper.venue or 'unknown'}\n"
-                    f"Text ({'full text excerpt' if paper.id in fulltexts else 'abstract'}):\n{clip(text, limit)}"
-                )
-            out = self.ask(
-                "literature.extraction",
-                f"{self.project_block()}\n\nExtract structured information for each paper below. Return one entry per paper id.\n\n"
-                + "\n\n".join(blocks),
-                ExtractionBatch,
-                {"papers": [{"id": p.id, "title": p.title, "abstract": p.abstract} for p in batch]},
-            )
-            by_id = {x.id.strip(): x for x in out.papers}
-            for unknown in set(by_id) - {p.id for p in batch}:
-                self.state.violation("no_fabricated_evidence", f"extraction returned unknown paper id '{unknown}'")
-            for paper in batch:
-                extraction = by_id.get(paper.id)
-                if extraction is not None:
-                    data = extraction.model_dump(exclude={"id"})
-                    for field, value in data.items():
-                        setattr(paper, field, value)
-                    paper.claims = extraction.claims
-                paper.extracted = True
-                paper.text_basis = "fulltext" if paper.id in fulltexts else ("abstract" if paper.abstract else "metadata")
-                self.state.update_paper(paper)
-                done += 1
-        return done
+                self._apply_extraction(paper, extractions.get(paper.id), fulltexts)
+        return len(pending)
+
+    def _extract_batch(self, batch: List[Paper], fulltexts: Dict[str, str]) -> Dict[str, Any]:
+        blocks = [_extraction_block(paper, fulltexts.get(paper.id)) for paper in batch]
+        out = self.ask(
+            "literature.extraction",
+            f"{self.project_block()}\n\nExtract structured information for each paper below. Return one entry per paper id.\n\n"
+            + "\n\n".join(blocks),
+            ExtractionBatch,
+            {"papers": [{"id": p.id, "title": p.title, "abstract": p.abstract} for p in batch]},
+        )
+        by_id = {x.id.strip(): x for x in out.papers}
+        for unknown in set(by_id) - {p.id for p in batch}:
+            self.state.violation("no_fabricated_evidence", f"extraction returned unknown paper id '{unknown}'")
+        return by_id
+
+    def _apply_extraction(self, paper: Paper, extraction: Any, fulltexts: Dict[str, str]) -> None:
+        if extraction is not None:
+            for field, value in extraction.model_dump(exclude={"id"}).items():
+                setattr(paper, field, value)
+            paper.claims = extraction.claims
+        paper.extracted = True
+        paper.text_basis = "fulltext" if paper.id in fulltexts else ("abstract" if paper.abstract else "metadata")
+        self.state.update_paper(paper)
 
     def _cluster(self) -> LiteratureClustering | None:
         papers = [p for p in self.state.papers() if p.extracted]
