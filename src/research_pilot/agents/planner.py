@@ -3,7 +3,7 @@
 from collections import defaultdict
 from typing import Dict, List
 
-from ..state.models import PLANNER_ACTIONS, Action, PlannerOutput, ProposalRevision, TaskEnvelope
+from ..state.models import PLANNER_ACTIONS, Action, PlannerOutput, ProposalRevision, ReviewIssue, TaskEnvelope
 from .base import Agent, clip
 
 RUN_ACTIONS = {"RUN_EXPERIMENT", "REPRODUCE_BASELINE", "RUN_ABLATION", "RUN_ROBUSTNESS_TEST"}
@@ -29,6 +29,20 @@ Priority is computed by code as scientific_value x uncertainty_reduction x feasi
 
 def priority(action: Action) -> float:
     return round(action.scientific_value * action.uncertainty_reduction * action.feasibility / max(action.cost, 0.05), 4)
+
+
+def _hint(type_: str, target: str, rationale: str, value: float, unc: float, feas: float = 0.8, cost: float = 0.4, addresses=None) -> Action:
+    return Action(type=type_, target=target, rationale=rationale, scientific_value=value, uncertainty_reduction=unc, feasibility=feas, cost=cost, addresses=addresses or [])
+
+
+def _review_hint(issue: ReviewIssue, addressed: bool, first_hypothesis: str | None, runs_left: int) -> Action:
+    if addressed:
+        return _hint("WRITE_PAPER", "", f"work done for review {issue.id}; revise the manuscript and request re-review", 0.8, 0.5, 0.9, 0.3, [issue.id])
+    if issue.required_action == "experiment" and first_hypothesis and runs_left > 0:
+        return _hint("RUN_ABLATION", first_hypothesis, f"review {issue.id}: {clip(issue.description, 120)}", 0.7, 0.6, 0.6, 0.6, [issue.id])
+    if issue.required_action == "literature":
+        return _hint("SEARCH_LITERATURE", clip(issue.suggestion or issue.description, 100), f"review {issue.id}", 0.5, 0.5, 0.9, 0.2, [issue.id])
+    return _hint("WRITE_PAPER", "", f"review {issue.id}: {clip(issue.description, 120)}", 0.6, 0.4, 0.9, 0.3, [issue.id])
 
 
 class ResearchPlanner(Agent):
@@ -193,66 +207,70 @@ class ResearchPlanner(Agent):
 
     def hints(self, budget: Dict) -> List[Action]:
         registry = self.state.experiments
-        runs = registry.runs()
         by_spec: Dict[str, list] = defaultdict(list)
-        for run in runs:
+        for run in registry.runs():
             by_spec[run.spec_key].append(run)
         runs_left = int(budget.get("runs_left", 1))
         hyps = {h.id: h for h in self.state.current_hypotheses(include_closed=False)}
         specs = [s for s in registry.latest_specs() if s.hypothesis_id in hyps and s.hypothesis_version == hyps[s.hypothesis_id].version]
-        out: List[Action] = []
+        manuscript = bool(self.store.manuscript())
+        out = [
+            *self._experiment_hints(specs, hyps, by_spec, runs_left),
+            *self._hypothesis_hints(specs, hyps, by_spec, runs_left),
+            *self._review_hints(next(iter(hyps), None), runs_left),
+            *self._writing_hints(runs_left, manuscript),
+        ]
+        if not out:
+            out.append(_hint("WRITE_PAPER" if not manuscript else "STOP", "", "no further informative action is available", 0.5, 0.3, 1.0, 0.2))
+        for action in out:
+            action.priority = priority(action)
+        return sorted(out, key=lambda a: a.priority, reverse=True)
 
-        def add(type_: str, target: str, rationale: str, value: float, unc: float, feas: float = 0.8, cost: float = 0.4, addresses=None):
-            out.append(
-                Action(type=type_, target=target, rationale=rationale, scientific_value=value, uncertainty_reduction=unc, feasibility=feas, cost=cost, addresses=addresses or [])
-            )
-
+    def _experiment_hints(self, specs: List, hyps: Dict, by_spec: Dict[str, list], runs_left: int) -> List[Action]:
+        out = []
         for spec in specs:
             spec_runs = by_spec.get(spec.key, [])
             if spec.status == "approved" and not spec_runs and runs_left > 0:
                 hyp = hyps[spec.hypothesis_id]
-                add("RUN_EXPERIMENT", spec.id, f"{spec.kind} experiment for {hyp.id} (priority {hyp.priority}) is approved but not run", 0.9 if spec.kind == "primary" else 0.7, 0.9 - 0.1 * (hyp.priority - 1))
+                out.append(_hint("RUN_EXPERIMENT", spec.id, f"{spec.kind} experiment for {hyp.id} (priority {hyp.priority}) is approved but not run", 0.9 if spec.kind == "primary" else 0.7, 0.9 - 0.1 * (hyp.priority - 1)))
             failed = [r for r in spec_runs if r.status == "failed"]
             if failed and not any(r.status == "completed" for r in spec_runs):
-                add("INVESTIGATE_FAILURE", failed[-1].id, f"{spec.key} failed: {clip(failed[-1].error, 120)}", 0.7, 0.6, 0.6, 0.5)
+                out.append(_hint("INVESTIGATE_FAILURE", failed[-1].id, f"{spec.key} failed: {clip(failed[-1].error, 120)}", 0.7, 0.6, 0.6, 0.5))
+        return out
+
+    def _hypothesis_hints(self, specs: List, hyps: Dict, by_spec: Dict[str, list], runs_left: int) -> List[Action]:
+        out = []
         for hyp in hyps.values():
             hyp_specs = [s for s in specs if s.hypothesis_id == hyp.id]
             if not hyp_specs:
-                add("DESIGN_EXPERIMENT", hyp.id, f"{hyp.key} has no experiment for its current version", 0.8, 0.8, 0.8, 0.3)
+                out.append(_hint("DESIGN_EXPERIMENT", hyp.id, f"{hyp.key} has no experiment for its current version", 0.8, 0.8, 0.8, 0.3))
                 continue
             claim_state = self.state.claim_state(f"C{hyp.key}")
             completed = [r for s in hyp_specs for r in by_spec.get(s.key, []) if r.status == "completed"]
             if claim_state == "PARTIALLY_SUPPORTED" and runs_left > 0 and not any(s.kind == "robustness" for s in hyp_specs):
-                add("RUN_ROBUSTNESS_TEST", hyp.id, f"{hyp.key} rests on a single supporting result", 0.7, 0.7, 0.7, 0.5)
-            if completed:
-                interp = self.store.interpretation(completed[-1].id)
-                if interp and interp.verdict == "inconclusive":
-                    add("INVESTIGATE_FAILURE", completed[-1].id, f"{completed[-1].id} was inconclusive for {hyp.key}", 0.6, 0.6, 0.7, 0.4)
+                out.append(_hint("RUN_ROBUSTNESS_TEST", hyp.id, f"{hyp.key} rests on a single supporting result", 0.7, 0.7, 0.7, 0.5))
+            interp = self.store.interpretation(completed[-1].id) if completed else None
+            if interp and interp.verdict == "inconclusive":
+                out.append(_hint("INVESTIGATE_FAILURE", completed[-1].id, f"{completed[-1].id} was inconclusive for {hyp.key}", 0.6, 0.6, 0.7, 0.4))
+        return out
+
+    def _review_hints(self, first_hypothesis: str | None, runs_left: int) -> List[Action]:
         addressed = self.addressed_issues()
-        for issue in self.open_review_issues():
-            if issue.severity == "minor":
-                continue
-            if issue.id in addressed:
-                add("WRITE_PAPER", "", f"work done for review {issue.id}; revise the manuscript and request re-review", 0.8, 0.5, 0.9, 0.3, [issue.id])
-                continue
-            if issue.required_action == "experiment" and hyps and runs_left > 0:
-                add("RUN_ABLATION", next(iter(hyps)), f"review {issue.id}: {clip(issue.description, 120)}", 0.7, 0.6, 0.6, 0.6, [issue.id])
-            elif issue.required_action == "literature":
-                add("SEARCH_LITERATURE", clip(issue.suggestion or issue.description, 100), f"review {issue.id}", 0.5, 0.5, 0.9, 0.2, [issue.id])
-            else:
-                add("WRITE_PAPER", "", f"review {issue.id}: {clip(issue.description, 120)}", 0.6, 0.4, 0.9, 0.3, [issue.id])
-        manuscript = bool(self.store.manuscript())
+        return [
+            _review_hint(issue, issue.id in addressed, first_hypothesis, runs_left)
+            for issue in self.open_review_issues()
+            if issue.severity != "minor"
+        ]
+
+    def _writing_hints(self, runs_left: int, manuscript: bool) -> List[Action]:
+        out = []
         if self._tested_all() and not manuscript:
-            add("WRITE_PAPER", "", "every active hypothesis has at least one completed experiment", 0.8, 0.5, 0.9, 0.3)
+            out.append(_hint("WRITE_PAPER", "", "every active hypothesis has at least one completed experiment", 0.8, 0.5, 0.9, 0.3))
         if runs_left <= 0 and not manuscript:
-            add("WRITE_PAPER", "", "experiment budget exhausted; write up the evidence that exists", 0.7, 0.4, 0.9, 0.3)
+            out.append(_hint("WRITE_PAPER", "", "experiment budget exhausted; write up the evidence that exists", 0.7, 0.4, 0.9, 0.3))
         if manuscript and not any(i.severity in {"critical", "major"} for i in self.open_review_issues()):
-            add("STOP", "", "manuscript reviewed with no open major issues", 0.6, 0.2, 1.0, 0.1)
-        if not out:
-            add("WRITE_PAPER" if not manuscript else "STOP", "", "no further informative action is available", 0.5, 0.3, 1.0, 0.2)
-        for action in out:
-            action.priority = priority(action)
-        return sorted(out, key=lambda a: a.priority, reverse=True)
+            out.append(_hint("STOP", "", "manuscript reviewed with no open major issues", 0.6, 0.2, 1.0, 0.1))
+        return out
 
     def addressed_issues(self) -> set:
         """Open review issues that already have work done for them since they were raised."""
