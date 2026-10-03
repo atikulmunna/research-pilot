@@ -129,66 +129,52 @@ class EvidenceGraph:
             return "UNKNOWN", {"reason": "cycle"}
         seen.add(claim_id)
 
-        experimental = 0.0
-        literature = 0.0
-        refute = 0.0
-        untested_source = False
-        ignored: List[str] = []
-        sources: List[str] = []
+        tally: Dict[str, Any] = {"experimental": 0.0, "literature": 0.0, "refuting": 0.0, "sources": [], "ignored_synthetic": [], "untested_source": False}
         for edge in self.incoming(claim_id, {"supports", "refutes", "contradicts"}):
             src = self.nodes.get(edge.source)
-            if src is None:
-                continue
-            if (src.attrs.get("synthetic") or edge.attrs.get("synthetic")) and not allow_synthetic:
-                ignored.append(src.id)
-                continue
-            if edge.relation != "supports":
-                refute += 1
-                sources.append(src.id)
-                continue
-            sources.append(src.id)
-            if src.type == "result":
-                experimental += 1
-            elif src.type == "paper":
-                weak = edge.attrs.get("basis") == "claimed" or src.attrs.get("evidence_quality") == "low"
-                literature += 0.5 if weak else 1.0
-            elif src.type == "claim":
-                sub_state, sub = self.derive_state(src.id, allow_synthetic, seen)
-                weight = {"SUPPORTED": 2.0, "PARTIALLY_SUPPORTED": 1.0}.get(sub_state, 0.0)
-                untested_source = untested_source or sub_state == "HYPOTHESIS"
-                if sub_state == "CONTRADICTED":
-                    refute += 1
-                elif sub.get("experimental", 0) > 0:
-                    experimental += weight
-                else:
-                    literature += weight
+            if src is not None:
+                self._count_edge(tally, edge, src, allow_synthetic, seen)
+        untested_source = tally.pop("untested_source")
+        support = tally["experimental"] + tally["literature"]
+        detail = {**tally, "contested": bool(tally["refuting"] and support)}
+        return self._classify(claim_id, node, detail, support, untested_source), detail
 
-        support = experimental + literature
-        detail = {
-            "experimental": experimental,
-            "literature": literature,
-            "refuting": refute,
-            "sources": sources,
-            "ignored_synthetic": ignored,
-            "contested": bool(refute and support),
-        }
-        kind = node.attrs.get("kind", "finding")
-        if refute and not support:
-            return "CONTRADICTED", detail
-        if refute and support:
-            return "PARTIALLY_SUPPORTED", detail
+    def _count_edge(self, tally: Dict[str, Any], edge: GraphEdge, src: GraphNode, allow_synthetic: bool, seen: set) -> None:
+        if (src.attrs.get("synthetic") or edge.attrs.get("synthetic")) and not allow_synthetic:
+            tally["ignored_synthetic"].append(src.id)
+            return
+        tally["sources"].append(src.id)
+        if edge.relation != "supports":
+            tally["refuting"] += 1
+        elif src.type == "result":
+            tally["experimental"] += 1
+        elif src.type == "paper":
+            weak = edge.attrs.get("basis") == "claimed" or src.attrs.get("evidence_quality") == "low"
+            tally["literature"] += 0.5 if weak else 1.0
+        elif src.type == "claim":
+            self._count_claim_source(tally, src.id, allow_synthetic, seen)
+
+    def _count_claim_source(self, tally: Dict[str, Any], source_id: str, allow_synthetic: bool, seen: set) -> None:
+        """A claim supported by another claim inherits that claim's evidence, by kind."""
+        sub_state, sub = self.derive_state(source_id, allow_synthetic, seen)
+        tally["untested_source"] = tally["untested_source"] or sub_state == "HYPOTHESIS"
+        if sub_state == "CONTRADICTED":
+            tally["refuting"] += 1
+            return
+        weight = {"SUPPORTED": 2.0, "PARTIALLY_SUPPORTED": 1.0}.get(sub_state, 0.0)
+        tally["experimental" if sub.get("experimental", 0) > 0 else "literature"] += weight
+
+    def _classify(self, claim_id: str, node: GraphNode, detail: Dict[str, Any], support: float, untested_source: bool) -> str:
+        if detail["refuting"]:
+            return "PARTIALLY_SUPPORTED" if support else "CONTRADICTED"
         if support == 0:
             if untested_source or node.attrs.get("hypothesis_claim") or self.outgoing(claim_id, {"motivates"}):
-                return "HYPOTHESIS", detail
-            if node.attrs.get("speculative"):
-                return "SPECULATION", detail
-            return "UNKNOWN", detail
-        if kind in EXPERIMENTAL_KINDS and experimental == 0:
+                return "HYPOTHESIS"
+            return "SPECULATION" if node.attrs.get("speculative") else "UNKNOWN"
+        if node.attrs.get("kind", "finding") in EXPERIMENTAL_KINDS and detail["experimental"] == 0:
             detail["reason"] = "untested: literature can motivate this claim but not establish it"
-            return "HYPOTHESIS", detail
-        if support >= 2:
-            return "SUPPORTED", detail
-        return "PARTIALLY_SUPPORTED", detail
+            return "HYPOTHESIS"
+        return "SUPPORTED" if support >= 2 else "PARTIALLY_SUPPORTED"
 
     def claim_states(self, allow_synthetic: bool = False) -> Dict[str, str]:
         return {n.id: self.derive_state(n.id, allow_synthetic)[0] for n in self.nodes_of("claim")}
