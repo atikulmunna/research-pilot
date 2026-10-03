@@ -184,8 +184,8 @@ class EvidenceGraph:
                 return "SPECULATION", detail
             return "UNKNOWN", detail
         if kind in EXPERIMENTAL_KINDS and experimental == 0:
-            detail["reason"] = "literature alone cannot establish this claim"
-            return "PARTIALLY_SUPPORTED", detail
+            detail["reason"] = "untested: literature can motivate this claim but not establish it"
+            return "HYPOTHESIS", detail
         if support >= 2:
             return "SUPPORTED", detail
         return "PARTIALLY_SUPPORTED", detail
