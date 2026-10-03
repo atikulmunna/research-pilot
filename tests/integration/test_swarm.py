@@ -209,3 +209,20 @@ def test_endgame_rewrites_a_manuscript_that_predates_new_results(mock_settings):
     assert not orchestrator._manuscript_current()
     orchestrator._maybe_endgame(limit=1000)
     assert store.decisions()[-1].kind == "endgame" and "predates" in store.decisions()[-1].reason
+
+
+def test_reopen_plans_directly_when_every_hypothesis_has_an_experiment(mock_settings):
+    settings = mock_settings()
+    store, project, _ = run_project(settings)
+    orchestrator = Orchestrator(settings, store)
+    orchestrator.reopen()
+    assert store.roadmap()[-1].type == "PLAN"
+    assert "planner" in store.decisions()[-1].downstream_effects[0]
+
+
+def test_planner_sees_the_cost_budget(mock_settings):
+    settings = mock_settings(max_cost_usd=6.0)
+    store = create_project(settings, "budget aware")
+    planner = Orchestrator(settings, store).agents["planner"]
+    summary = planner.state_summary({"step": 3, "max_steps": 60, "runs_left": 4, "cost_spent": 4.5, "cost_cap": 6.0})
+    assert "$4.50 spent of a $6.00 budget ($1.50 left)" in summary

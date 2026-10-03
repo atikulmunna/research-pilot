@@ -141,19 +141,21 @@ class Orchestrator:
         return self.project
 
     def reopen(self) -> None:
-        """Continue a finished project: keep all state, design missing experiments, then plan."""
+        """Continue a finished project: keep all state, design experiments only where none exist, then plan."""
         if self.project.status != "completed":
             return
         self.project.status = "paused"
         self.project.outcome = ""
         self.project.stop_reason = ""
-        self.state.log_decision(
-            "reopen",
-            "Reopen the project for more research",
-            "requested by the user",
-            effects=["missing experiments are designed and critiqued, then the planner resumes"],
-        )
-        self.roadmap.append(self._new("DESIGN_EXPERIMENT", mode="design"))
+        specs = self.state.experiments.latest_specs()
+        untested = [
+            h.id
+            for h in self.state.current_hypotheses(include_closed=False)
+            if not any(s.hypothesis_id == h.id and s.hypothesis_version == h.version for s in specs)
+        ]
+        next_step = "design experiments for " + ", ".join(untested) if untested else "hand control to the planner"
+        self.state.log_decision("reopen", "Reopen the project for more research", "requested by the user", effects=[next_step])
+        self.roadmap.append(self._new("DESIGN_EXPERIMENT", mode="design") if untested else self._new("PLAN"))
         self._save_roadmap()
         self._save()
 
@@ -504,6 +506,8 @@ class Orchestrator:
             "step": self.project.step,
             "max_steps": self.settings.max_steps,
             "runs_left": self.settings.max_experiment_runs - len(runs),
+            "cost_spent": round(self.project.usage.cost_usd, 2),
+            "cost_cap": self.settings.max_cost_usd,
         }
         result = self._task("planner", "PLAN", "Decide what the swarm should do next", {"budget": budget})
         self._supersede_planned()
