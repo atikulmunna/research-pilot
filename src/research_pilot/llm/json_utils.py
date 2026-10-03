@@ -61,27 +61,26 @@ def _extract_balanced_object(text: str) -> str:
     if start == -1:
         return ""
     depth = 0
-    in_str = False
-    esc = False
+    in_str = escaped = False
     for idx in range(start, len(text)):
         ch = text[idx]
         if in_str:
-            if esc:
-                esc = False
-            elif ch == "\\":
-                esc = True
-            elif ch == '"':
-                in_str = False
+            in_str, escaped = _string_step(ch, escaped)
             continue
-        if ch == '"':
-            in_str = True
-        elif ch == "{":
-            depth += 1
-        elif ch == "}":
-            depth -= 1
-            if depth == 0:
-                return text[start : idx + 1]
+        in_str = ch == '"'
+        depth += {"{": 1, "}": -1}.get(ch, 0)
+        if ch == "}" and depth == 0:
+            return text[start : idx + 1]
     return ""
+
+
+def _string_step(ch: str, escaped: bool) -> tuple[bool, bool]:
+    """Advance one character inside a string literal; returns (still in the string, escape pending)."""
+    if escaped:
+        return True, False
+    if ch == "\\":
+        return True, True
+    return ch != '"', False
 
 
 def _is_json_compatible(value: Any) -> bool:
