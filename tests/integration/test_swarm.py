@@ -226,3 +226,17 @@ def test_planner_sees_the_cost_budget(mock_settings):
     planner = Orchestrator(settings, store).agents["planner"]
     summary = planner.state_summary({"step": 3, "max_steps": 60, "runs_left": 4, "cost_spent": 4.5, "cost_cap": 6.0})
     assert "$4.50 spent of a $6.00 budget ($1.50 left)" in summary
+
+
+def test_planner_sees_the_step_limit_of_the_current_run(mock_settings):
+    from types import SimpleNamespace
+
+    from research_pilot.state.models import Action
+
+    settings = mock_settings(max_steps=60)
+    orchestrator = Orchestrator(settings, create_project(settings, "step aware"))
+    orchestrator.run(max_steps=3)
+    budgets = []
+    orchestrator._task = lambda agent, kind, objective, inputs: budgets.append(inputs["budget"]) or SimpleNamespace(data={}, recommendations=[])
+    orchestrator._do_plan(Action(type="PLAN"))
+    assert budgets[0]["max_steps"] == 3
