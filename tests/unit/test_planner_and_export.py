@@ -62,3 +62,18 @@ def test_reference_formatting_marks_synthetic_sources():
     paper = Paper(id="P001", title="T", year=2021, authors=["A", "B", "C"], venue="ICML", doi="10.1/x")
     assert format_reference(paper) == "[P001] A et al. (2021). T. *ICML*. https://doi.org/10.1/x"
     assert "synthetic" in format_reference(paper.model_copy(update={"synthetic": True}))
+
+
+def test_paper_writer_sees_every_run_deviation(mock_settings):
+    from research_pilot.agents.paper_architect import PaperArchitect
+
+    settings = mock_settings()
+    _, state = planner_for(settings)
+    state.add_hypothesis(Hypothesis(statement="h"))
+    spec = state.add_experiment(ExperimentSpec(hypothesis_id="H1", objective="o", method="m", baselines=["b"], metrics=[MetricSpec(name="acc")]))
+    state.approve_experiment(spec.id)
+    deviation = "reviewer code repair: the solver changed so the gate converges; thresholds unchanged " + "x" * 300
+    state.experiments.create_run(state.experiments.spec("E1"), "print()", "manual", [0], deviations=[deviation])
+    architect = PaperArchitect(AgentDeps(state, ModelRouter(settings), settings, None, None, None))
+    assert f"deviations from the protocol: {deviation}" in architect._evidence_block()
+    assert deviation in architect._reproducibility()
