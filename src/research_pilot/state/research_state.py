@@ -36,6 +36,7 @@ from .registry import ExperimentRegistry
 from .store import ProjectStore
 
 PAPER_SOURCES = {"openalex", "semantic_scholar", "arxiv", "mock"}
+MERGEABLE_PAPER_FIELDS = ("doi", "arxiv_id", "openalex_id", "s2_id", "pdf_url", "abstract", "venue")
 LEADING_ID = re.compile(r"[A-Z]{1,2}\d+(?:-\d+)?(?:@v\d+)?(?![\w@])")
 
 
@@ -57,6 +58,19 @@ def paper_keys(paper: Paper) -> Set[str]:
     if len(title) > 12:
         keys.add("title:" + title)
     return keys
+
+
+def merge_paper(known: Paper, duplicate: Paper, found_by: str) -> bool:
+    """Fill gaps in a known paper from a duplicate of it; returns whether anything changed."""
+    filled = [attr for attr in MERGEABLE_PAPER_FIELDS if not getattr(known, attr) and getattr(duplicate, attr)]
+    for attr in filled:
+        setattr(known, attr, getattr(duplicate, attr))
+    tags = [tag for tag in dict.fromkeys(duplicate.found_by or [found_by]) if tag not in known.found_by]
+    known.found_by.extend(tags)
+    promoted = duplicate.seed and not known.seed
+    if promoted:
+        known.seed = True
+    return bool(filled or tags or promoted)
 
 
 class ResearchState:
@@ -109,54 +123,46 @@ class ResearchState:
         return self.filter_refs(refs, self.paper_ids(), context)
 
     def add_papers(self, candidates: Iterable[Paper], found_by: str) -> List[Paper]:
-        existing = self.papers()
-        index: Dict[str, Paper] = {}
-        for paper in existing:
-            for key in paper_keys(paper):
-                index[key] = paper
+        index = {key: paper for paper in self.papers() for key in paper_keys(paper)}
         added: List[Paper] = []
         for candidate in candidates:
-            traceable = any([candidate.doi, candidate.arxiv_id, candidate.openalex_id, candidate.s2_id, candidate.url])
-            if candidate.source not in PAPER_SOURCES or not traceable or not candidate.title.strip():
-                self.violation("no_fabricated_evidence", f"rejected paper without a traceable source: {candidate.title[:80]!r}")
+            if not self._traceable(candidate):
                 continue
             keys = paper_keys(candidate)
             match = next((index[k] for k in keys if k in index), None)
             if match is not None:
-                changed = False
-                for attr in ("doi", "arxiv_id", "openalex_id", "s2_id", "pdf_url", "abstract", "venue"):
-                    if not getattr(match, attr) and getattr(candidate, attr):
-                        setattr(match, attr, getattr(candidate, attr))
-                        changed = True
-                for tag in candidate.found_by or [found_by]:
-                    if tag not in match.found_by:
-                        match.found_by.append(tag)
-                        changed = True
-                if candidate.seed and not match.seed:
-                    match.seed = True
-                    changed = True
-                if changed:
+                if merge_paper(match, candidate, found_by):
                     self.store.save_paper(match)
                 continue
-            paper = candidate.model_copy(deep=True)
-            paper.id = self.store.next_id("P", width=3)
-            paper.added_at = now_iso()
-            paper.found_by = list(candidate.found_by) or [found_by]
-            self.store.save_paper(paper)
-            for key in keys:
-                index[key] = paper
+            paper = self._store_new_paper(candidate, found_by)
+            index.update(dict.fromkeys(keys, paper))
             added.append(paper)
-            self.graph.add_node(
-                paper.id,
-                "paper",
-                paper.title,
-                year=paper.year,
-                source=paper.source,
-                synthetic=paper.synthetic,
-                evidence_quality=paper.evidence_quality,
-            )
         self.save_graph()
         return added
+
+    def _traceable(self, candidate: Paper) -> bool:
+        identified = any([candidate.doi, candidate.arxiv_id, candidate.openalex_id, candidate.s2_id, candidate.url])
+        if candidate.source in PAPER_SOURCES and identified and candidate.title.strip():
+            return True
+        self.violation("no_fabricated_evidence", f"rejected paper without a traceable source: {candidate.title[:80]!r}")
+        return False
+
+    def _store_new_paper(self, candidate: Paper, found_by: str) -> Paper:
+        paper = candidate.model_copy(deep=True)
+        paper.id = self.store.next_id("P", width=3)
+        paper.added_at = now_iso()
+        paper.found_by = list(candidate.found_by) or [found_by]
+        self.store.save_paper(paper)
+        self.graph.add_node(
+            paper.id,
+            "paper",
+            paper.title,
+            year=paper.year,
+            source=paper.source,
+            synthetic=paper.synthetic,
+            evidence_quality=paper.evidence_quality,
+        )
+        return paper
 
     def find_paper(self, candidate: Paper) -> Paper | None:
         keys = paper_keys(candidate)
