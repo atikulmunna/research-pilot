@@ -86,7 +86,7 @@ def _dump(data: Any) -> Any:
     return data
 
 
-def _read_with_retry(path: Path) -> str:
+def read_with_retry(path: Path) -> str:
     """Read a file. On Windows a read fails while a writer is replacing that file, so retry briefly."""
     for attempt in range(LOCKED_FILE_ATTEMPTS - 1):
         try:
@@ -149,7 +149,7 @@ class ProjectStore:
         out = []
         for path in base.glob("*/project.yaml"):
             try:
-                out.append(Project.model_validate(load_yaml(_read_with_retry(path))))
+                out.append(Project.model_validate(load_yaml(read_with_retry(path))))
             except Exception as exc:
                 log.warning("skipping unreadable project %s: %s", path.parent.name, exc)
         out.sort(key=lambda p: p.updated_at, reverse=True)
@@ -181,7 +181,7 @@ class ProjectStore:
         path = self.path(rel)
         if not path.exists():
             return default
-        data = load_yaml(_read_with_retry(path))
+        data = load_yaml(read_with_retry(path))
         return default if data is None else data
 
     def write_yaml(self, rel: str, data: Any) -> None:
@@ -190,7 +190,7 @@ class ProjectStore:
 
     def read_text(self, rel: str, default: str = "") -> str:
         path = self.path(rel)
-        return _read_with_retry(path) if path.exists() else default
+        return read_with_retry(path) if path.exists() else default
 
     def write_text(self, rel: str, text: str) -> None:
         path = self.path(rel)
@@ -211,7 +211,7 @@ class ProjectStore:
         if not path.exists():
             return []
         rows = []
-        for line in _read_with_retry(path).splitlines():
+        for line in read_with_retry(path).splitlines():
             if line.strip():
                 try:
                     rows.append(json.loads(line))
@@ -259,7 +259,7 @@ class ProjectStore:
         if self._papers is None:
             folder = self.path("literature/papers")
             files = sorted(folder.glob("*.yaml")) if folder.exists() else []
-            self._papers = {p.stem: Paper.model_validate(load_yaml(_read_with_retry(p))) for p in files}
+            self._papers = {p.stem: Paper.model_validate(load_yaml(read_with_retry(p))) for p in files}
         return self._papers
 
     def papers(self) -> List[Paper]:
@@ -339,7 +339,7 @@ class ProjectStore:
         self.write_yaml(f"analysis/quantitative/{result.run_id}.yaml", result)
 
     def quant_results(self) -> List[QuantResult]:
-        return [QuantResult.model_validate(load_yaml(_read_with_retry(p))) for p in sorted(self.path("analysis/quantitative").glob("*.yaml"))]
+        return [QuantResult.model_validate(load_yaml(read_with_retry(p))) for p in sorted(self.path("analysis/quantitative").glob("*.yaml"))]
 
     def interpretation(self, run_id: str) -> Interpretation | None:
         return self._load_one(f"analysis/interpretations/{run_id}.yaml", Interpretation)
@@ -348,7 +348,7 @@ class ProjectStore:
         self.write_yaml(f"analysis/interpretations/{item.run_id}.yaml", item)
 
     def interpretations(self) -> List[Interpretation]:
-        return [Interpretation.model_validate(load_yaml(_read_with_retry(p))) for p in sorted(self.path("analysis/interpretations").glob("*.yaml"))]
+        return [Interpretation.model_validate(load_yaml(read_with_retry(p))) for p in sorted(self.path("analysis/interpretations").glob("*.yaml"))]
 
     # ------------------------------------------------------------ decisions and roadmap
 
@@ -386,7 +386,7 @@ class ProjectStore:
 
     def reviews(self) -> List[ReviewReport]:
         folder = self.path("reviews/red_team")
-        return [ReviewReport.model_validate(load_yaml(_read_with_retry(p))) for p in sorted(folder.glob("review_*.yaml"))]
+        return [ReviewReport.model_validate(load_yaml(read_with_retry(p))) for p in sorted(folder.glob("review_*.yaml"))]
 
     def save_review(self, report: ReviewReport) -> None:
         self.write_yaml(f"reviews/red_team/review_{report.round:02d}.yaml", report)
