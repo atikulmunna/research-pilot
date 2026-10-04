@@ -31,6 +31,21 @@ def priority(action: Action) -> float:
     return round(action.scientific_value * action.uncertainty_reduction * action.feasibility / max(action.cost, 0.05), 4)
 
 
+def rank_actions(actions: List[Action]) -> List[Action]:
+    """Highest priority first, one action per (type, target), marked as planner-made."""
+    seen = set()
+    ranked = []
+    for action in sorted(actions, key=priority, reverse=True):
+        key = (action.type, action.target)
+        if key in seen:
+            continue
+        seen.add(key)
+        action.priority = priority(action)
+        action.origin = "planner"
+        ranked.append(action)
+    return ranked
+
+
 def _hint(type_: str, target: str, rationale: str, value: float, unc: float, feas: float = 0.8, cost: float = 0.4, addresses=None) -> Action:
     return Action(type=type_, target=target, rationale=rationale, scientific_value=value, uncertainty_reduction=unc, feasibility=feas, cost=cost, addresses=addresses or [])
 
@@ -59,14 +74,30 @@ class ResearchPlanner(Agent):
     def _plan(self, task: TaskEnvelope):
         budget = dict(task.inputs.get("budget", {}))
         hints = self.hints(budget)
+        evidence_sufficient = self._tested_all() and not any(h.type == "RUN_EXPERIMENT" for h in hints)
+        out = self._ask_planner(budget, hints, evidence_sufficient)
+        rejected: List[str] = []
+        ranked = rank_actions(self._valid_actions(out, hints, budget, evidence_sufficient, rejected))
+        abandoned = self._abandon(out, task.task_id)
+        if ranked:
+            self._log_plan(ranked, out, rejected, task.task_id)
+        return self.result(
+            task,
+            findings=[clip(out.assessment, 400)] if out.assessment else [],
+            recommendations=[f"{a.type} {a.target} (priority {a.priority})".strip() for a in ranked],
+            uncertainties=list(out.blockers) + [f"rejected candidate: {r}" for r in rejected],
+            artifacts=["roadmap/roadmap.yaml", "decisions/decision_log.yaml"],
+            data={"actions": [a.model_dump(mode="json") for a in ranked], "abandoned": abandoned},
+        )
+
+    def _ask_planner(self, budget: Dict, hints: List[Action], evidence_sufficient: bool) -> PlannerOutput:
         summary = self.state_summary(budget)
         hint_lines = "\n".join(
             f"- {h.type} {h.target}: {h.rationale} (value {h.scientific_value}, uncertainty {h.uncertainty_reduction}, feasibility {h.feasibility}, cost {h.cost})"
             for h in hints
         )
-        evidence_sufficient = self._tested_all() and not any(h.type == "RUN_EXPERIMENT" for h in hints)
         try:
-            out = self.ask(
+            return self.ask(
                 "research.planning",
                 f"{summary}\n\nCandidate actions computed from the state (you may add others):\n{hint_lines or '(none)'}\n\n{CATALOGUE}\n\n"
                 "Propose up to 5 ranked candidate actions, decide whether evidence suffices for writing, and list any hypotheses to abandon.",
@@ -74,31 +105,19 @@ class ResearchPlanner(Agent):
                 {"hints": [h.model_dump(mode="json") for h in hints], "evidence_sufficient": evidence_sufficient},
             )
         except Exception as exc:
-            out = PlannerOutput(assessment=f"Planner model unavailable ({type(exc).__name__}); using state-derived candidates.")
+            return PlannerOutput(assessment=f"Planner model unavailable ({type(exc).__name__}); using state-derived candidates.")
 
-        rejected: List[str] = []
-        actions = []
-        for candidate in out.candidates:
-            valid = self.validate(candidate, budget, rejected)
-            if valid is not None:
-                actions.append(valid)
+    def _valid_actions(self, out: PlannerOutput, hints: List[Action], budget: Dict, evidence_sufficient: bool, rejected: List[str]) -> List[Action]:
+        """The model's valid candidates, else the valid state-derived hints, plus drafting once evidence suffices."""
+        actions = [a for a in (self.validate(c, budget, rejected) for c in out.candidates) if a is not None]
         if not actions:
             actions = [a for a in (self.validate(h, budget, rejected) for h in hints) if a is not None]
-        if (out.evidence_sufficient_for_paper or evidence_sufficient) and not self.store.manuscript():
-            if not any(a.type == "WRITE_PAPER" for a in actions):
-                actions.append(Action(type="WRITE_PAPER", rationale="evidence judged sufficient for drafting", scientific_value=0.8, uncertainty_reduction=0.5, feasibility=0.9, cost=0.3))
+        wants_paper = (out.evidence_sufficient_for_paper or evidence_sufficient) and not self.store.manuscript()
+        if wants_paper and not any(a.type == "WRITE_PAPER" for a in actions):
+            actions.append(Action(type="WRITE_PAPER", rationale="evidence judged sufficient for drafting", scientific_value=0.8, uncertainty_reduction=0.5, feasibility=0.9, cost=0.3))
+        return actions
 
-        seen = set()
-        ranked = []
-        for action in sorted(actions, key=priority, reverse=True):
-            key = (action.type, action.target)
-            if key in seen:
-                continue
-            seen.add(key)
-            action.priority = priority(action)
-            action.origin = "planner"
-            ranked.append(action)
-
+    def _abandon(self, out: PlannerOutput, task_id: str) -> List[str]:
         abandoned = []
         for request in out.abandon:
             hyp = self.state.hypothesis(request.hypothesis_id)
@@ -109,31 +128,24 @@ class ResearchPlanner(Agent):
                 f"Abandon {hyp.key}",
                 request.reason,
                 evidence=[r.id for r in self.state.experiments.runs() if r.hypothesis_id == hyp.id],
-                agent_inputs=[task.task_id],
+                agent_inputs=[task_id],
                 effects=["no further experiments for this hypothesis"],
             )
             self.state.set_hypothesis_status(hyp.id, "abandoned")
             abandoned.append(f"{hyp.key} ({decision.id})")
+        return abandoned
 
-        if ranked:
-            top = ranked[0]
-            hotspots = self.state.graph.uncertainty_hotspots(self.settings.allow_synthetic_evidence)
-            self.state.log_decision(
-                "plan",
-                f"Next action: {top.type} {top.target}".strip(),
-                top.rationale or out.assessment,
-                evidence=[h["claim"] for h in hotspots[:3]],
-                alternatives=[f"{a.type} {a.target} (priority {a.priority})".strip() for a in ranked[1:6]] + [f"rejected: {r}" for r in rejected[:5]],
-                agent_inputs=[task.task_id],
-                effects=[f"{len(ranked)} actions queued on the roadmap"],
-            )
-        return self.result(
-            task,
-            findings=[clip(out.assessment, 400)] if out.assessment else [],
-            recommendations=[f"{a.type} {a.target} (priority {a.priority})".strip() for a in ranked],
-            uncertainties=list(out.blockers) + [f"rejected candidate: {r}" for r in rejected],
-            artifacts=["roadmap/roadmap.yaml", "decisions/decision_log.yaml"],
-            data={"actions": [a.model_dump(mode="json") for a in ranked], "abandoned": abandoned},
+    def _log_plan(self, ranked: List[Action], out: PlannerOutput, rejected: List[str], task_id: str) -> None:
+        top = ranked[0]
+        hotspots = self.state.graph.uncertainty_hotspots(self.settings.allow_synthetic_evidence)
+        self.state.log_decision(
+            "plan",
+            f"Next action: {top.type} {top.target}".strip(),
+            top.rationale or out.assessment,
+            evidence=[h["claim"] for h in hotspots[:3]],
+            alternatives=[f"{a.type} {a.target} (priority {a.priority})".strip() for a in ranked[1:6]] + [f"rejected: {r}" for r in rejected[:5]],
+            agent_inputs=[task_id],
+            effects=[f"{len(ranked)} actions queued on the roadmap"],
         )
 
     def validate(self, action: Action, budget: Dict, rejected: List[str]) -> Action | None:
