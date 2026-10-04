@@ -258,6 +258,9 @@ class ResearchPlanner(Agent):
             if not hyp_specs:
                 out.append(_hint("DESIGN_EXPERIMENT", hyp.id, f"{hyp.key} has no experiment for its current version", 0.8, 0.8, 0.8, 0.3))
                 continue
+            if not any(s.kind == "primary" for s in hyp_specs):
+                # Validation and diagnostic runs alone can never test the hypothesis itself.
+                out.append(_hint("DESIGN_EXPERIMENT", hyp.id, f"{hyp.key} has no primary experiment for its current version, so it is still untested", 0.9, 0.9, 0.8, 0.3))
             claim_state = self.state.claim_state(f"C{hyp.key}")
             completed = [r for s in hyp_specs for r in by_spec.get(s.key, []) if r.status == "completed"]
             if claim_state == "PARTIALLY_SUPPORTED" and runs_left > 0 and not any(s.kind == "robustness" for s in hyp_specs):

@@ -77,3 +77,17 @@ def test_paper_writer_sees_every_run_deviation(mock_settings):
     architect = PaperArchitect(AgentDeps(state, ModelRouter(settings), settings, None, None, None))
     assert f"deviations from the protocol: {deviation}" in architect._evidence_block()
     assert deviation in architect._reproducibility()
+
+
+def test_planner_hints_a_primary_design_when_only_validation_exists(mock_settings):
+    planner, state = planner_for(mock_settings())
+    state.add_hypothesis(Hypothesis(statement="h"))
+    gate = state.add_experiment(ExperimentSpec(hypothesis_id="H1", kind="validation", objective="gate", method="m", baselines=["b"], metrics=[MetricSpec(name="acc")]))
+    state.approve_experiment(gate.id)
+
+    def untested(hints):
+        return [h for h in hints if h.type == "DESIGN_EXPERIMENT" and h.target == "H1" and "no primary experiment" in h.rationale]
+
+    assert untested(planner.hints({"runs_left": 5}))
+    state.add_experiment(ExperimentSpec(hypothesis_id="H1", kind="primary", objective="test", method="m", baselines=["b"], metrics=[MetricSpec(name="acc")]))
+    assert not untested(planner.hints({"runs_left": 5}))
