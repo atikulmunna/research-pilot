@@ -46,3 +46,7 @@ research_pilot = ["web/*.html"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+
+[tool.ruff.lint]
+# The rules this code is written against. Listing them keeps CI stable when ruff changes its defaults.
+select = ["E4", "E7", "E9", "F", "W605"]

@@ -34,7 +34,7 @@ def test_project_layout_matches_plan(state):
 
 def test_project_and_run_ids_cannot_escape_the_workspace(state):
     workspace = state.settings.workspace_dir
-    for bad in ("../outside", "..\outside", "a/b", "Upper", "x" * 90):
+    for bad in ("../outside", r"..\outside", "a/b", "Upper", "x" * 90):
         with pytest.raises(FileNotFoundError, match="Invalid project id"):
             ProjectStore.open(workspace, bad)
     assert ProjectStore.open(workspace, state.store.root.name).root == state.store.root
