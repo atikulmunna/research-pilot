@@ -5,7 +5,7 @@ from pathlib import Path
 from threading import Lock
 from typing import Any, Dict, List
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
@@ -49,6 +49,17 @@ def create_app(settings: Settings | None = None, runner: ProjectRunner | None = 
             runner.shutdown()
 
     app = FastAPI(title="Research Pilot API", version="0.2.0", lifespan=lifespan)
+    _install_auth_and_rate_limit(app, settings)
+    app.include_router(_project_routes(settings, runner))
+    app.include_router(_data_routes(settings, runner))
+    app.include_router(_page_routes())
+    app.state.runner = runner
+    app.state.settings = settings
+    return app
+
+
+def _install_auth_and_rate_limit(app: FastAPI, settings: Settings) -> None:
+    """API routes require the configured token (if any) and share a per-minute request budget per caller."""
     rate_lock = Lock()
     rate_counters: Dict[str, Dict[str, int]] = {}
 
@@ -63,25 +74,37 @@ def create_app(settings: Settings | None = None, runner: ProjectRunner | None = 
         per_minute = int(settings.api_rate_limit_per_minute or 0)
         if per_minute > 0:
             identifier = provided or (request.client.host if request.client else "anonymous")
-            window = int(time.time() // 60)
             with rate_lock:
-                bucket = rate_counters.get(identifier)
-                if not bucket or bucket["window"] != window:
-                    bucket = {"window": window, "count": 0}
-                if bucket["count"] >= per_minute:
-                    rate_counters[identifier] = bucket
+                if not _take_request(rate_counters, identifier, per_minute):
                     return JSONResponse(status_code=429, content={"detail": "Rate limit exceeded"})
-                bucket["count"] += 1
-                rate_counters[identifier] = bucket
         return await call_next(request)
 
-    def open_store(project_id: str) -> ProjectStore:
-        try:
-            return ProjectStore.open(settings.workspace_dir, project_id)
-        except FileNotFoundError:
-            raise HTTPException(status_code=404, detail="Project not found")
 
-    @app.post("/api/v1/projects", status_code=202)
+def _take_request(counters: Dict[str, Dict[str, int]], identifier: str, per_minute: int) -> bool:
+    """Count one request in the caller's current minute; False when the minute's budget is used up."""
+    window = int(time.time() // 60)
+    bucket = counters.get(identifier)
+    if not bucket or bucket["window"] != window:
+        bucket = {"window": window, "count": 0}
+    counters[identifier] = bucket
+    if bucket["count"] >= per_minute:
+        return False
+    bucket["count"] += 1
+    return True
+
+
+def _open_store(settings: Settings, project_id: str) -> ProjectStore:
+    try:
+        return ProjectStore.open(settings.workspace_dir, project_id)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+
+def _project_routes(settings: Settings, runner: ProjectRunner) -> APIRouter:
+    """Creating, listing, starting and cancelling projects."""
+    router = APIRouter()
+
+    @router.post("/api/v1/projects", status_code=202)
     def create(payload: CreateProject):
         store = create_project(
             settings,
@@ -96,7 +119,7 @@ def create_app(settings: Settings | None = None, runner: ProjectRunner | None = 
         started = runner.start(project_id, payload.max_steps) if payload.autorun else False
         return {"project_id": project_id, "status": "running" if started else "created"}
 
-    @app.get("/api/v1/projects")
+    @router.get("/api/v1/projects")
     def list_projects():
         running = {p.id for p in ProjectStore.list_projects(settings.workspace_dir) if runner.is_running(p.id)}
         return {
@@ -106,15 +129,15 @@ def create_app(settings: Settings | None = None, runner: ProjectRunner | None = 
             ]
         }
 
-    @app.get("/api/v1/projects/{project_id}")
+    @router.get("/api/v1/projects/{project_id}")
     def get_project(project_id: str):
-        store = open_store(project_id)
+        store = _open_store(settings, project_id)
         running = runner.is_running(store.root.name)
         return {**views.overview(store, settings), "running": running}
 
-    @app.post("/api/v1/projects/{project_id}/run", status_code=202)
+    @router.post("/api/v1/projects/{project_id}/run", status_code=202)
     def run_project(project_id: str, payload: RunRequest | None = None):
-        store = open_store(project_id)
+        store = _open_store(settings, project_id)
         project = store.load_project()
         if project.status == "completed":
             raise HTTPException(status_code=409, detail="Project already completed")
@@ -122,33 +145,40 @@ def create_app(settings: Settings | None = None, runner: ProjectRunner | None = 
             raise HTTPException(status_code=409, detail="Project is already running")
         return {"project_id": project.id, "status": "running"}
 
-    @app.post("/api/v1/projects/{project_id}/cancel")
+    @router.post("/api/v1/projects/{project_id}/cancel")
     def cancel_project(project_id: str):
-        store = open_store(project_id)
+        store = _open_store(settings, project_id)
         return {"project_id": store.root.name, "cancelled": runner.cancel(store.root.name)}
 
-    @app.get("/api/v1/projects/{project_id}/state/{section}")
+    return router
+
+
+def _data_routes(settings: Settings, runner: ProjectRunner) -> APIRouter:
+    """Reading project state, evidence, activity, metrics and the manuscript; ingesting manual results."""
+    router = APIRouter()
+
+    @router.get("/api/v1/projects/{project_id}/state/{section}")
     def get_section(project_id: str, section: str):
-        store = open_store(project_id)
+        store = _open_store(settings, project_id)
         if section not in views.SECTIONS:
             raise HTTPException(status_code=404, detail=f"Unknown section. Choose from: {', '.join(views.SECTIONS)}")
         return {"section": section, "data": views.section(store, settings, section)}
 
-    @app.get("/api/v1/projects/{project_id}/evidence")
+    @router.get("/api/v1/projects/{project_id}/evidence")
     def get_evidence(project_id: str, graph: bool = False):
-        return views.evidence_report(open_store(project_id), settings, include_graph=graph)
+        return views.evidence_report(_open_store(settings, project_id), settings, include_graph=graph)
 
-    @app.get("/api/v1/projects/{project_id}/activity")
+    @router.get("/api/v1/projects/{project_id}/activity")
     def get_activity(project_id: str, limit: int = 100):
-        return {"events": open_store(project_id).activity(limit=max(1, min(limit, 1000)))}
+        return {"events": _open_store(settings, project_id).activity(limit=max(1, min(limit, 1000)))}
 
-    @app.get("/api/v1/projects/{project_id}/metrics")
+    @router.get("/api/v1/projects/{project_id}/metrics")
     def get_metrics(project_id: str):
-        return views.metrics_report(open_store(project_id))
+        return views.metrics_report(_open_store(settings, project_id))
 
-    @app.get("/api/v1/projects/{project_id}/manuscript")
+    @router.get("/api/v1/projects/{project_id}/manuscript")
     def get_manuscript(project_id: str, format: str = "md"):
-        store = open_store(project_id)
+        store = _open_store(settings, project_id)
         markdown = store.manuscript()
         if not markdown:
             raise HTTPException(status_code=404, detail="No manuscript yet")
@@ -156,9 +186,9 @@ def create_app(settings: Settings | None = None, runner: ProjectRunner | None = 
             return HTMLResponse(markdown_to_html(markdown, store.load_project().title))
         return PlainTextResponse(markdown, media_type="text/markdown")
 
-    @app.post("/api/v1/projects/{project_id}/runs/{run_id}/results")
+    @router.post("/api/v1/projects/{project_id}/runs/{run_id}/results")
     def ingest(project_id: str, run_id: str, payload: IngestRequest):
-        store = open_store(project_id)
+        store = _open_store(settings, project_id)
         if runner.is_running(store.root.name):
             raise HTTPException(status_code=409, detail="Project is running")
         text = payload.text or "\n".join(json.dumps(r) for r in payload.records)
@@ -169,21 +199,25 @@ def create_app(settings: Settings | None = None, runner: ProjectRunner | None = 
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 
-    @app.get("/api/v1/routing")
+    @router.get("/api/v1/routing")
     def get_routing():
         return {"routes": views.routing_table(settings)}
 
-    @app.get("/dashboard", include_in_schema=False)
+    return router
+
+
+def _page_routes() -> APIRouter:
+    router = APIRouter()
+
+    @router.get("/dashboard", include_in_schema=False)
     def dashboard():
         return HTMLResponse((Path(__file__).parent / "web" / "dashboard.html").read_text(encoding="utf-8"))
 
-    @app.get("/", include_in_schema=False)
+    @router.get("/", include_in_schema=False)
     def root():
         return RedirectResponse("/dashboard")
 
-    app.state.runner = runner
-    app.state.settings = settings
-    return app
+    return router
 
 
 app = create_app()
