@@ -142,51 +142,52 @@ class ResearchPlanner(Agent):
         if action.type not in PLANNER_ACTIONS:
             rejected.append(f"{action.type or '?'} is not a known action")
             return None
-        registry = self.state.experiments
-        runs_left = int(budget.get("runs_left", 1))
-        if action.type in RUN_ACTIONS and runs_left <= 0:
+        if action.type in RUN_ACTIONS and int(budget.get("runs_left", 1)) <= 0:
             rejected.append(f"{action.type} {action.target}: experiment budget exhausted")
             return None
-        specs = {s.id: s for s in registry.latest_specs()}
+        specs = {s.id: s for s in self.state.experiments.latest_specs()}
         target = action.target.split("@")[0]
         if action.type == "RUN_EXPERIMENT":
-            spec = specs.get(target)
-            if spec is None and self._active_hypothesis(target):
-                return action.model_copy(update={"type": "DESIGN_EXPERIMENT", "target": target})
-            if spec is None or spec.status != "approved":
-                rejected.append(f"RUN_EXPERIMENT {action.target}: not an approved experiment")
-                return None
-            if len(registry.runs_for(spec.key)) >= self.settings.max_runs_per_spec:
-                rejected.append(f"RUN_EXPERIMENT {spec.id}: run limit reached")
-                return None
-            action.target = spec.id
-            return action
+            return self._validate_run(action, specs.get(target), target, rejected)
         if action.type in KIND_FOR_ACTION and target in specs:
             spec = specs[target]
-            if spec.kind == KIND_FOR_ACTION[action.type] and spec.status == "approved" and not registry.runs_for(spec.key):
+            if spec.kind == KIND_FOR_ACTION[action.type] and spec.status == "approved" and not self.state.experiments.runs_for(spec.key):
                 return action.model_copy(update={"type": "RUN_EXPERIMENT", "target": spec.id})
             target = spec.hypothesis_id
+        return self._validate_target(action, target, rejected)
+
+    def _validate_run(self, action: Action, spec, target: str, rejected: List[str]) -> Action | None:
+        if spec is None and self._active_hypothesis(target):
+            return action.model_copy(update={"type": "DESIGN_EXPERIMENT", "target": target})
+        if spec is None or spec.status != "approved":
+            rejected.append(f"RUN_EXPERIMENT {action.target}: not an approved experiment")
+            return None
+        if len(self.state.experiments.runs_for(spec.key)) >= self.settings.max_runs_per_spec:
+            rejected.append(f"RUN_EXPERIMENT {spec.id}: run limit reached")
+            return None
+        action.target = spec.id
+        return action
+
+    def _validate_target(self, action: Action, target: str, rejected: List[str]) -> Action | None:
+        """Check the target of an action that does not run an experiment directly."""
         if action.type in NEEDS_HYPOTHESIS:
-            if not self._active_hypothesis(target):
-                rejected.append(f"{action.type} {action.target}: no active hypothesis with that id")
-                return None
-            action.target = target
-            return action
+            return self._accept_target(action, target, self._active_hypothesis(target), "no active hypothesis with that id", rejected)
         if action.type == "INVESTIGATE_FAILURE":
-            if registry.run(target) is None:
-                rejected.append(f"INVESTIGATE_FAILURE {action.target}: unknown run")
-                return None
-            action.target = target
-            return action
+            return self._accept_target(action, target, self.state.experiments.run(target) is not None, "unknown run", rejected)
         if action.type in {"FORM_HYPOTHESIS", "SEARCH_LITERATURE"}:
-            action.target = action.target or clip(action.rationale, 160)
-            if not action.target:
-                rejected.append(f"{action.type}: missing statement or query")
-                return None
-            return action
+            target = action.target or clip(action.rationale, 160)
+            return self._accept_target(action, target, bool(target), "missing statement or query", rejected, label=action.type)
         if action.type == "REQUEST_REVIEW" and not self.store.manuscript():
             return action.model_copy(update={"type": "WRITE_PAPER", "target": ""})
         action.target = ""
+        return action
+
+    @staticmethod
+    def _accept_target(action: Action, target: str, valid: bool, reason: str, rejected: List[str], label: str = "") -> Action | None:
+        if not valid:
+            rejected.append(f"{label or f'{action.type} {action.target}'}: {reason}")
+            return None
+        action.target = target
         return action
 
     def _active_hypothesis(self, hypothesis_id: str) -> bool:
