@@ -215,7 +215,9 @@ Every project has hard budgets, and all of them are **cumulative across resumes*
 
 The cost cap is checked between steps, so the last step can go slightly over it. A model call that is in flight when the process is killed may be billed by the provider without being recorded.
 
-What it costs in practice: on the label-smoothing project, which ran mostly on the recommended mix, a first reviewed draft with two completed experiments cost **$6.75**, and seven experiments with three review rounds cost **$10.76**. Most of the spend was experiment design and critique on the strong tier. The cheapest saving is to move those tasks to the standard tier:
+`MAX_COST_USD` is the project's cap, not your provider balance. Keep a few dollars more in your provider account than the project may still spend: OpenRouter rejects a request with HTTP 402 when the balance is too low, and it can count a call's full output allowance (`max_tokens`) when checking, which for a strong-tier call can exceed a dollar. If that happens mid-run, the step fails cleanly and nothing is charged; see [Troubleshooting](#troubleshooting).
+
+What it costs in practice: on the label-smoothing project, which ran mostly on the recommended mix, a first reviewed draft with two completed experiments cost **$6.75**, and seven experiments with three review rounds cost **$10.76**. Most of the spend was experiment design and critique on the strong tier: a later session spent $2.91 revising one hypothesis and designing three experiments, and the provider credit ran out before any of them ran. The cheapest saving is to move those tasks to the standard tier:
 
 ```bash
 LLM_TASK_OVERRIDES=critique.design=standard,hypothesis.design=standard
@@ -264,6 +266,16 @@ The eight completion checks are: manuscript written, central claims supported, c
 | Reproducibility record | | `paper/supplementary/reproducibility.md` |
 
 Claim states come from the evidence graph, not from the model: `SUPPORTED` needs two supporting results, `PARTIALLY_SUPPORTED` one, a contribution with only literature behind it stays a `HYPOTHESIS`, and contradicting evidence gives `CONTRADICTED`. A guard violation means a model referred to a paper, hypothesis, experiment or run that does not exist; the reference was dropped and logged.
+
+### Viewing and sharing results
+
+Results stay on your machine: `projects/` is listed in `.gitignore`, so nothing a project produces is committed or pushed. To look at a project:
+
+- **Dashboard:** `research-pilot serve`, then open `http://127.0.0.1:8000/dashboard` for the manuscript, claims, evidence, experiments, decisions and spend.
+- **Manuscript as a web page:** `research-pilot export <project> --to html --output paper.html`, then open the file in a browser. The Markdown source is `projects/<project>/paper/manuscript/manuscript.md`.
+- **Everything else:** the YAML and Markdown files in the project folder, described below.
+
+To share a project, send the exported HTML, or zip the project folder; anyone with Research Pilot installed can open a copied folder by placing it in their own `WORKSPACE_DIR`.
 
 ### The project folder
 
@@ -415,6 +427,8 @@ Settings come from the environment or `.env`; `.env.example` lists them all with
 ## Troubleshooting
 
 **Every Anthropic call fails with "Connection error".** An old `brotli` package (some Anaconda installs ship 1.0.9) breaks response decoding in the HTTP client. Install `brotli>=1.2.0` in the environment that runs Research Pilot.
+
+**A step fails with "402 Client Error: Payment Required" from OpenRouter.** The account balance is too low for the request; OpenRouter can count the request's full output allowance (`max_tokens`) when checking. Nothing was charged. Add credit, or lower the output cap of the tier that failed (for example `LLM_STRONG_MAX_TOKENS=16000`), then `research-pilot run <project>` to retry the step. To end the project instead, keep the current manuscript; `research-pilot status <project>` shows what it covers.
 
 **The project stopped with `budget_exhausted` or `step_limit`.** Raise `MAX_COST_USD` (it counts everything spent so far) or pass a larger `--max-steps` (the total, not the remainder), then `research-pilot run <project> --reopen`.
 
