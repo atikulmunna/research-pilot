@@ -3,7 +3,7 @@
 import random
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 import anthropic
 import requests
@@ -51,6 +51,57 @@ def normalize_provider(name: str) -> str:
 def uses_thinking_budget(model: str) -> bool:
     lowered = model.lower()
     return any(marker in lowered for marker in LEGACY_THINKING_MARKERS)
+
+
+def anthropic_request(model: str, messages: List[Dict[str, str]], effort: str | None, max_tokens: int | None) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """Messages API parameters, plus the beta arguments when the model supports server-side fallback (else empty)."""
+    system = "\n\n".join(m["content"] for m in messages if m["role"] == "system")
+    params: Dict[str, Any] = {
+        "model": model,
+        "max_tokens": max_tokens or DEFAULT_MAX_TOKENS,
+        "messages": [m for m in messages if m["role"] != "system"],
+    }
+    if system:
+        params["system"] = system
+    if uses_thinking_budget(model):
+        budget = LEGACY_THINKING_BUDGET.get(effort or "")
+        if budget:
+            params["thinking"] = {"type": "enabled", "budget_tokens": budget}
+            params["max_tokens"] = max(params["max_tokens"], budget + 4096)
+        return params, {}
+    params["thinking"] = {"type": "adaptive"}
+    if effort:
+        params["output_config"] = {"effort": effort}
+    return params, ({"betas": [FALLBACK_BETA], "fallbacks": "default"} if model in FALLBACK_MODELS else {})
+
+
+def check_stop_reason(response: Any, model: str, max_tokens: int) -> None:
+    if response.stop_reason == "max_tokens":
+        raise ModelTruncated(f"{model} stopped at max_tokens={max_tokens} before finishing its answer")
+    if response.stop_reason == "refusal":
+        details = getattr(response, "stop_details", None)
+        category = getattr(details, "category", None) if details else None
+        raise ModelRefusal(f"{model} declined the request (category: {category or 'unspecified'})")
+
+
+def anthropic_completion(response: Any, model: str) -> Completion:
+    """Text and token usage of a final message; cache reads and writes count as prompt tokens."""
+    usage = response.usage
+    prompt_tokens = (
+        int(usage.input_tokens or 0)
+        + int(getattr(usage, "cache_creation_input_tokens", 0) or 0)
+        + int(getattr(usage, "cache_read_input_tokens", 0) or 0)
+    )
+    completion_tokens = int(usage.output_tokens or 0)
+    return Completion(
+        text="".join(block.text for block in response.content if block.type == "text"),
+        provider="anthropic",
+        model=str(getattr(response, "model", "") or model),
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        total_tokens=prompt_tokens + completion_tokens,
+        raw=response,
+    )
 
 
 class ProviderClient:
@@ -104,52 +155,14 @@ class ProviderClient:
         temperature: float | None,
         max_tokens: int | None,
     ) -> Completion:
-        system = "\n\n".join(m["content"] for m in messages if m["role"] == "system")
-        params: Dict[str, Any] = {
-            "model": model,
-            "max_tokens": max_tokens or DEFAULT_MAX_TOKENS,
-            "messages": [m for m in messages if m["role"] != "system"],
-        }
-        if system:
-            params["system"] = system
+        params, extra = anthropic_request(model, messages, effort, max_tokens)
         client = self.anthropic_client()
         # The 1.x SDK no longer accepts sampling parameters, so temperature is not sent to Anthropic.
-        open_stream, extra = client.messages.stream, {}
-        if uses_thinking_budget(model):
-            budget = LEGACY_THINKING_BUDGET.get(effort or "")
-            if budget:
-                params["thinking"] = {"type": "enabled", "budget_tokens": budget}
-                params["max_tokens"] = max(params["max_tokens"], budget + 4096)
-        else:
-            params["thinking"] = {"type": "adaptive"}
-            if effort:
-                params["output_config"] = {"effort": effort}
-            if model in FALLBACK_MODELS:
-                open_stream, extra = client.beta.messages.stream, {"betas": [FALLBACK_BETA], "fallbacks": "default"}
+        open_stream = client.beta.messages.stream if extra else client.messages.stream
         with open_stream(**params, **extra) as stream:
             response = stream.get_final_message()
-        if response.stop_reason == "max_tokens":
-            raise ModelTruncated(f"{model} stopped at max_tokens={params['max_tokens']} before finishing its answer")
-        if response.stop_reason == "refusal":
-            details = getattr(response, "stop_details", None)
-            category = getattr(details, "category", None) if details else None
-            raise ModelRefusal(f"{model} declined the request (category: {category or 'unspecified'})")
-        usage = response.usage
-        prompt_tokens = (
-            int(usage.input_tokens or 0)
-            + int(getattr(usage, "cache_creation_input_tokens", 0) or 0)
-            + int(getattr(usage, "cache_read_input_tokens", 0) or 0)
-        )
-        completion_tokens = int(usage.output_tokens or 0)
-        return Completion(
-            text="".join(block.text for block in response.content if block.type == "text"),
-            provider="anthropic",
-            model=str(getattr(response, "model", "") or model),
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-            total_tokens=prompt_tokens + completion_tokens,
-            raw=response,
-        )
+        check_stop_reason(response, model, params["max_tokens"])
+        return anthropic_completion(response, model)
 
     # ------------------------------------------------------------ openrouter
 
