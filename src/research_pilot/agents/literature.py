@@ -29,30 +29,8 @@ class LiteratureIntelligence(Agent):
 
     def run(self, task: TaskEnvelope):
         project = self.project()
-        field_map = self.store.field_map()
-        lit_map = self.store.literature_map()
         focus = str(task.inputs.get("focus", "") or "")
-        searched = set(q.lower() for q in lit_map.get("queries", []))
-
-        if task.inputs.get("queries"):
-            queries = list(task.inputs["queries"])
-        else:
-            hint = ""
-            if field_map and field_map.literature_queries:
-                hint = "Field Scout suggestions:\n" + "\n".join(f"- {q}" for q in field_map.literature_queries)
-            plan = self.ask(
-                "literature.search_queries",
-                f"{self.project_block()}\n\n{hint}\n\nFocus for this round: {focus or 'core prior work and competing approaches'}\n"
-                f"Already searched: {', '.join(sorted(searched)) or 'nothing yet'}\n\n"
-                "Propose 3 to 6 new academic search queries that find seminal work, recent work and competing approaches.",
-                QueryPlan,
-                {"topic": project.topic, "focus": focus},
-            )
-            queries = plan.queries
-            if field_map and not lit_map.get("rounds"):
-                queries = [*queries, *field_map.literature_queries]
-        queries = [q for q in unique(queries) if q.lower() not in searched][:6]
-
+        queries = self._queries(task, focus)
         targeted = bool(task.inputs.get("queries") or focus)
         added = self._retrieve(queries, project.topic + " " + (self.state.proposal().text if self.state.proposal() else ""), targeted)
         chained = self._chase_citations()
@@ -60,8 +38,49 @@ class LiteratureIntelligence(Agent):
         extracted = self._extract(fulltexts)
         clustering = self._cluster()
         verified = self._verify_claims(fulltexts)
-
         papers = self.state.papers()
+        lit_map = self._update_literature_map(queries, papers, clustering)
+        self.state.save_graph()
+
+        findings = [
+            f"Round {lit_map['rounds']}: {len(queries)} queries, {len(added)} new papers, {chained} via citation chains ({len(papers)} total)",
+            f"{extracted} papers extracted; {len(clustering.clusters) if clustering else 0} methodology clusters",
+        ]
+        if verified:
+            findings.append(f"{verified} claims checked against full text")
+        return self.result(
+            task,
+            findings=findings,
+            contradictions=list(clustering.contradictions) if clustering else [],
+            uncertainties=lit_map["warnings"][-5:],
+            artifacts=["literature/literature_map.yaml", "literature/clusters/clusters.yaml", "literature/citations/citation_graph.yaml"],
+        )
+
+    def _queries(self, task: TaskEnvelope, focus: str) -> List[str]:
+        """Up to six queries not searched before: the requested ones, else model-proposed ones."""
+        lit_map = self.store.literature_map()
+        searched = set(q.lower() for q in lit_map.get("queries", []))
+        queries = list(task.inputs["queries"]) if task.inputs.get("queries") else self._propose_queries(focus, searched, lit_map)
+        return [q for q in unique(queries) if q.lower() not in searched][:6]
+
+    def _propose_queries(self, focus: str, searched: set, lit_map: Dict) -> List[str]:
+        field_map = self.store.field_map()
+        hint = ""
+        if field_map and field_map.literature_queries:
+            hint = "Field Scout suggestions:\n" + "\n".join(f"- {q}" for q in field_map.literature_queries)
+        plan = self.ask(
+            "literature.search_queries",
+            f"{self.project_block()}\n\n{hint}\n\nFocus for this round: {focus or 'core prior work and competing approaches'}\n"
+            f"Already searched: {', '.join(sorted(searched)) or 'nothing yet'}\n\n"
+            "Propose 3 to 6 new academic search queries that find seminal work, recent work and competing approaches.",
+            QueryPlan,
+            {"topic": self.project().topic, "focus": focus},
+        )
+        if field_map and not lit_map.get("rounds"):
+            return [*plan.queries, *field_map.literature_queries]
+        return plan.queries
+
+    def _update_literature_map(self, queries: List[str], papers: List[Paper], clustering: LiteratureClustering | None) -> Dict:
         lit_map = self.store.literature_map()
         lit_map["providers"] = self.deps.literature.provider_names
         lit_map["queries"] = unique([*lit_map.get("queries", []), *queries])
@@ -73,22 +92,7 @@ class LiteratureIntelligence(Agent):
         lit_map["warnings"] = [*lit_map.get("warnings", []), *self.deps.literature.drain_warnings()][-50:]
         lit_map["updated_at"] = now_iso()
         self.store.save_literature_map(lit_map)
-        self.state.save_graph()
-
-        findings = [
-            f"Round {lit_map['rounds']}: {len(queries)} queries, {len(added)} new papers, {chained} via citation chains ({len(papers)} total)",
-            f"{extracted} papers extracted; {len(clustering.clusters) if clustering else 0} methodology clusters",
-        ]
-        if verified:
-            findings.append(f"{verified} claims checked against full text")
-        contradictions = list(clustering.contradictions) if clustering else []
-        return self.result(
-            task,
-            findings=findings,
-            contradictions=contradictions,
-            uncertainties=lit_map["warnings"][-5:],
-            artifacts=["literature/literature_map.yaml", "literature/clusters/clusters.yaml", "literature/citations/citation_graph.yaml"],
-        )
+        return lit_map
 
     # ------------------------------------------------------------ retrieval (code)
 
