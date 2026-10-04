@@ -11,7 +11,7 @@ import re
 from typing import Dict, List
 
 from .models import ExperimentRun, ExperimentSpec, RunAttempt, RunRecord, now_iso
-from .store import ProjectStore, load_yaml
+from .store import ProjectStore, load_yaml, read_with_retry
 
 
 RUN_ID = re.compile(r"R\d{1,6}")
@@ -33,7 +33,7 @@ class ExperimentRegistry:
 
     def specs(self) -> List[ExperimentSpec]:
         folder = self.store.path("experiments/specs")
-        items = [ExperimentSpec.model_validate(load_yaml(p.read_text(encoding="utf-8"))) for p in folder.glob("*.yaml")]
+        items = [ExperimentSpec.model_validate(load_yaml(read_with_retry(p))) for p in folder.glob("*.yaml")]
         items.sort(key=lambda s: (int(s.id[1:]) if s.id[1:].isdigit() else 0, s.version))
         return items
 
@@ -98,7 +98,7 @@ class ExperimentRegistry:
 
     def runs(self) -> List[ExperimentRun]:
         folder = self.store.path("experiments/runs")
-        items = [ExperimentRun.model_validate(load_yaml(p.read_text(encoding="utf-8"))) for p in folder.glob("*/run.yaml")]
+        items = [ExperimentRun.model_validate(load_yaml(read_with_retry(p))) for p in folder.glob("*/run.yaml")]
         items.sort(key=lambda r: r.id)
         return items
 
