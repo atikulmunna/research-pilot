@@ -33,7 +33,7 @@ Every model call is a registered task kind with a difficulty and a capability. T
 - Tasks at or above `LLM_STANDARD_MIN_DIFFICULTY` (default `medium_high`) use the standard tier and tasks at or above `LLM_STRONG_MIN_DIFFICULTY` (default `very_high`) the strong tier. Coding tasks use the coding tier, which falls back to the standard model.
 - Opus is kept for the very-high work where nothing checks the model afterwards. Standard-tier output is backed by code checks: interpretation verdicts are capped by the statistics, plans are validated before they run, and drafts go through citation and number checks.
 - If a lite or standard answer cannot be parsed or validated, the call is retried once on the next tier up. Escalations are counted.
-- `LLM_TASK_OVERRIDES` moves single tasks between tiers, for example `paper.drafting=lite`.
+- `LLM_TASK_OVERRIDES` moves single tasks between tiers, for example `critique.design=standard,hypothesis.design=standard` to keep design critique and hypothesis design off the strong tier.
 - Tokens and cost are tracked per tier and per task (`research-pilot metrics`). Claude prices are built in, so cost budgets work.
 
 On Claude Opus 5.5 and Sonnet 5.5 the effort maps to `output_config.effort` with adaptive thinking, and server-side refusal fallbacks (`fallbacks: "default"`) are enabled so a declined request is retried on Anthropic's recommended model. On Claude Haiku 4.5, low effort runs without thinking and medium or high effort uses a thinking budget.
@@ -69,7 +69,7 @@ LLM_PROVIDER=mock LITERATURE_PROVIDERS=mock EXPERIMENT_EXECUTOR=simulated \
   research-pilot new "retrieval augmented generation under distribution shift" --run
 ```
 
-For a real project, put your key in `.env` (`ANTHROPIC_API_KEY=...`). The defaults use Claude Haiku 4.5 for lite work, Claude Sonnet 5.5 for standard and coding work, and Claude Opus 5.5 only for very-high-difficulty work. A full run costs about **$2.45** with these defaults (estimated from measured prompt sizes; how long the models think moves it between roughly $1.80 and $3.70), so keep a cap such as `MAX_COST_USD=3.80`. At 70% of the cap the orchestrator writes and reviews the manuscript before anything else.
+For a real project, put your key in `.env` (`ANTHROPIC_API_KEY=...`). The defaults use Claude Haiku 4.5 for lite work, Claude Sonnet 5.5 for standard and coding work, and Claude Opus 5.5 only for very-high-difficulty work. Always set `MAX_COST_USD`. On the label-smoothing project below, which ran mostly on the recommended mix, a first reviewed draft with two completed experiments cost **$6.75**, and seven experiments with three review rounds cost **$10.76** in total. Most of that was experiment design and critique on the strong tier, so moving `critique.design` and `hypothesis.design` to the standard tier is the cheapest saving (see `LLM_TASK_OVERRIDES` above). When $0.75 of the cap is left, the orchestrator writes and reviews the manuscript before anything else. The cap is checked between steps, so the last step can go slightly over it.
 
 ```bash
 research-pilot new "Label smoothing and calibration of small classifiers" \
@@ -90,11 +90,11 @@ OpenRouter works as well, and tiers can mix providers. The recommended mix, chos
 
 Set `LLM_FALLBACK_PROVIDER=openrouter` and `LLM_FALLBACK_MODEL=anthropic/claude-opus-5.5` so strong work continues on OpenRouter if the Anthropic account runs out of credit. The block is in `.env.example`.
 
-To continue a finished project (for example to run experiments a budget stop skipped), use `research-pilot run <project> --reopen`. It keeps all state, designs and critiques the missing experiments, then hands control back to the planner.
+To continue a finished project (for example to run experiments a budget stop skipped), use `research-pilot run <project> --reopen`. It keeps all state, designs and critiques the missing experiments, then hands control back to the planner. Budgets are cumulative per project: `MAX_COST_USD` and the step limit (`MAX_STEPS`, or `run --max-steps N`) count everything the project has used across resumes, so raise them when you continue a project.
 
 ## Experiments
 
-The Experiment Engineer writes a self-contained `run.py` per approved experiment. Contract: `python run.py --seed N --output-dir DIR`, printing one `RESULT_JSON: {"arm": ..., "seed": ..., "metrics": {...}}` line per arm.
+The Experiment Engineer writes a self-contained `run.py` per approved experiment. Contract: `python run.py --seed N --output-dir DIR`, printing one `RESULT_JSON: {"arm": ..., "seed": ..., "metrics": {...}}` line per arm. One invocation is one independent replicate: data, splits and initialisation come from the seed, and the swarm computes the statistics across seeds. All seeds share the output directory, so artifact file names include the seed.
 
 | `EXPERIMENT_EXECUTOR` | Behaviour |
 |---|---|
@@ -102,7 +102,17 @@ The Experiment Engineer writes a self-contained `run.py` per approved experiment
 | `subprocess` | Runs generated code locally with a timeout. Not a sandbox: enable it only for code you are willing to run. `research-pilot experiments execute <project> R###` runs a single reviewed run. |
 | `simulated` | Deterministic synthetic numbers for demos and tests, always flagged synthetic. |
 
-Failed runs are repaired by the coding tier up to `EXPERIMENT_MAX_REPAIRS` times; each repair is logged and the failed attempt kept.
+With the `subprocess` executor, failed runs are repaired by the coding tier up to `EXPERIMENT_MAX_REPAIRS` times; each repair is logged and the failed attempt kept. Every deviation recorded on a run (declared by the engineer, a code repair, or missing results) is passed to the Paper Architect, which must disclose it in Methods, and the reproducibility record lists them in full.
+
+Review generated scripts before you run them, and run one seed first. On the label-smoothing project, five of seven scripts needed a fix before they produced valid results:
+
+- a self-check that failed on optimiser tolerance rather than on a real error;
+- tuning grids that contradicted the approved spec;
+- a crash from a mistyped dictionary key;
+- a script that looped over all replicates inside one invocation;
+- self-check test cases that contradicted the hypothesis's own decision rules.
+
+Keep the protocol unchanged when you fix a script; only the `RESULT_JSON` lines are ingested.
 
 ## Project state
 
@@ -176,8 +186,8 @@ Settings come from the environment or `.env`; `.env.example` lists them all.
 | `LITERATURE_PROVIDERS` | `openalex,arxiv` | Also `semantic_scholar` (set `SEMANTIC_SCHOLAR_API_KEY`) or `mock` |
 | `LITERATURE_FULLTEXT_TOP_K` | `0` | Read open-access PDFs of the top papers and verify their claims |
 | `EXPERIMENT_EXECUTOR` | `manual` | `manual`, `subprocess` or `simulated` |
-| `MAX_STEPS`, `MAX_EXPERIMENT_RUNS`, `MAX_REVIEW_ROUNDS` | `60`, `8`, `2` | Orchestration budgets |
-| `MAX_COST_USD`, `MAX_TOTAL_TOKENS`, `MAX_SECONDS` | `0` (off) | Hard budgets; the manuscript is written at 70% of a cost or token budget |
+| `MAX_STEPS`, `MAX_EXPERIMENT_RUNS`, `MAX_REVIEW_ROUNDS` | `60`, `8`, `2` | Orchestration budgets; steps count the project's total across resumes |
+| `MAX_COST_USD`, `MAX_TOTAL_TOKENS`, `MAX_SECONDS` | `0` (off) | Hard budgets, cumulative per project. The manuscript is written once $0.75 of the cost budget is left or 70% of the token budget is used |
 
 ## Development
 
@@ -192,6 +202,8 @@ The suite covers routing, the Anthropic and OpenRouter providers, parsing, repai
 - Manuscript quality depends on the strong model; the mock provider only proves the control flow.
 - Semantic Scholar rate-limits anonymous use and arXiv can be slow; provider failures become warnings and the run continues.
 - The `subprocess` executor is not a sandbox.
+- Coverage checks confirm that a script reported every arm, seed and metric, but nothing checks automatically that the script implements its spec; that needs a human reviewer.
+- There is no CLI command yet for recording a reviewer's fix to a generated script. The registry supports it (`ExperimentRegistry.update_code` keeps the original script and logs the change as a deviation), so call it from Python until then.
 - PDF export is plain text; use the HTML export for formatted output.
 
 ## Previous version
