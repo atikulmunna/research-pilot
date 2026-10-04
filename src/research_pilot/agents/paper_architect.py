@@ -2,7 +2,7 @@ import re
 from typing import Dict, List, Tuple
 
 from ..services.bibliography import bibliography
-from ..state.models import MANUSCRIPT_SECTIONS, ClaimMap, Draft, ExperimentSpec, TaskEnvelope
+from ..state.models import MANUSCRIPT_SECTIONS, ClaimMap, Draft, ExperimentSpec, Paper, TaskEnvelope
 from .base import Agent, clip, paper_digest, ranked_papers
 from .quant_analyst import comparison_table, summary_table
 
@@ -28,9 +28,34 @@ class PaperArchitect(Agent):
         revising = bool(self.store.manuscript())
         evidence = self._evidence_block()
         papers = ranked_papers(p for p in self.state.papers() if p.extracted)[:20]
+        claim_map = self._claim_map(evidence, papers)
+        tables = self._write_tables()
+        draft = self.ask(
+            "paper.drafting",
+            self._drafting_prompt(evidence, papers, claim_map, tables, revising),
+            Draft,
+            {"claims": [c.model_dump() for c in claim_map.claims], "papers": [p.id for p in papers], "title": self.project().title},
+        )
+        draft, qa = self._quality_checks(draft, claim_map, tables)
+        lay = self._lay_summary(draft.abstract)
+        self.store.save_draft(draft)
+        self.store.write_yaml("paper/qa.yaml", {**qa, "lay_summary": lay})
+        self.store.write_text("paper/supplementary/reproducibility.md", self._reproducibility())
+        self.render_manuscript()
+        return self.result(
+            task,
+            findings=[
+                f"{'Revised' if revising else 'Drafted'} manuscript with {len(claim_map.claims)} claims and {len(tables)} result tables",
+                "Claim states: " + ", ".join(f"{c.id}={c.state}" for c in claim_map.claims),
+            ],
+            uncertainties=[f"{k}: {v}" for k, v in qa.items() if v and k != "unsupported_statements"],
+            artifacts=["paper/manuscript/manuscript.md", "paper/claims.yaml", "paper/qa.yaml", "paper/supplementary/reproducibility.md"],
+            data={"claims": len(claim_map.claims), "qa": {k: len(v) for k, v in qa.items()}},
+        )
+
+    def _claim_map(self, evidence: str, papers: List[Paper]) -> ClaimMap:
         hyps = self.state.current_hypotheses()
         runs = [r for r in self.state.experiments.runs() if r.status == "completed"]
-
         claim_map = self.ask(
             "paper.claims",
             f"{self.project_block()}\n\n{evidence}\n\nLiterature:\n{paper_digest(papers, detail=False)}\n\n"
@@ -43,12 +68,15 @@ class PaperArchitect(Agent):
                 "papers": [p.id for p in papers],
             },
         )
-        claim_map = self.state.set_manuscript_claims(claim_map)
+        return self.state.set_manuscript_claims(claim_map)
 
+    def _write_tables(self) -> List[Tuple[str, str]]:
         tables = self._tables()
         for idx, (caption, body) in enumerate(tables, start=1):
             self.store.write_text(f"paper/tables/table_{idx}.md", f"**{caption}**\n\n{body}\n")
+        return tables
 
+    def _drafting_prompt(self, evidence: str, papers: List[Paper], claim_map: ClaimMap, tables: List[Tuple[str, str]], revising: bool) -> str:
         claims_text = "\n".join(
             f"- {c.id} [{c.kind}, {c.importance}, evidence state {c.state}] {c.text} "
             f"(hypotheses {c.hypothesis_ids or '-'}, runs {c.run_ids or '-'}, papers {c.paper_ids or '-'})"
@@ -65,41 +93,29 @@ class PaperArchitect(Agent):
             "Report negative and inconclusive results. Put synthetic, missing or contradictory evidence in Limitations. "
             "Disclose every listed run deviation from the protocol in Methods.",
         ]
-        issues = [i for r in self.store.reviews() for i in r.issues if i.status == "open"]
         if revising:
-            previous = self.store.draft()
-            if previous:
-                parts.append(f"Previous draft abstract:\n{clip(previous.abstract, 1200)}")
-            if issues:
-                parts.append("Address these open review issues where writing can address them:\n" + "\n".join(f"- {i.id} [{i.severity}, {i.dimension}] {i.description} -> {i.suggestion}" for i in issues))
-        draft = self.ask(
-            "paper.drafting",
-            "\n\n".join(parts) + "\n\nWrite the full paper as markdown text per section (no section headings inside the fields).",
-            Draft,
-            {"claims": [c.model_dump() for c in claim_map.claims], "papers": [p.id for p in papers], "title": self.project().title},
-        )
-        draft, qa = self._quality_checks(draft, claim_map, tables)
-        lay = ""
-        if draft.abstract:
-            lay = self.ask_text(
-                "text.rewriting",
-                f"Rewrite this abstract as a plain-language summary of at most three sentences. Do not add any claim.\n\n{draft.abstract}",
-                {"text": draft.abstract},
-            ).strip()
-        self.store.save_draft(draft)
-        self.store.write_yaml("paper/qa.yaml", {**qa, "lay_summary": lay})
-        self.store.write_text("paper/supplementary/reproducibility.md", self._reproducibility())
-        self.render_manuscript()
-        return self.result(
-            task,
-            findings=[
-                f"{'Revised' if revising else 'Drafted'} manuscript with {len(claim_map.claims)} claims and {len(tables)} result tables",
-                "Claim states: " + ", ".join(f"{c.id}={c.state}" for c in claim_map.claims),
-            ],
-            uncertainties=[f"{k}: {v}" for k, v in qa.items() if v and k != "unsupported_statements"],
-            artifacts=["paper/manuscript/manuscript.md", "paper/claims.yaml", "paper/qa.yaml", "paper/supplementary/reproducibility.md"],
-            data={"claims": len(claim_map.claims), "qa": {k: len(v) for k, v in qa.items()}},
-        )
+            parts.extend(self._revision_context())
+        return "\n\n".join(parts) + "\n\nWrite the full paper as markdown text per section (no section headings inside the fields)."
+
+    def _revision_context(self) -> List[str]:
+        """The previous abstract and the open review issues, for a revision."""
+        parts = []
+        issues = [i for r in self.store.reviews() for i in r.issues if i.status == "open"]
+        previous = self.store.draft()
+        if previous:
+            parts.append(f"Previous draft abstract:\n{clip(previous.abstract, 1200)}")
+        if issues:
+            parts.append("Address these open review issues where writing can address them:\n" + "\n".join(f"- {i.id} [{i.severity}, {i.dimension}] {i.description} -> {i.suggestion}" for i in issues))
+        return parts
+
+    def _lay_summary(self, abstract: str) -> str:
+        if not abstract:
+            return ""
+        return self.ask_text(
+            "text.rewriting",
+            f"Rewrite this abstract as a plain-language summary of at most three sentences. Do not add any claim.\n\n{abstract}",
+            {"text": abstract},
+        ).strip()
 
     # ------------------------------------------------------------ evidence and tables (code)
 
