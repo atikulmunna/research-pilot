@@ -292,27 +292,12 @@ class ModelRouter:
     def _mock(self, route: Route, context: Dict[str, Any] | None) -> Any:
         start = time.perf_counter()
         result = self.mock.respond(route.task, context or {})
-        self._record(
-            CallRecord(
-                task=route.task,
-                tier=route.tier.value,
-                difficulty=route.difficulty.label,
-                provider="mock",
-                model=route.model,
-                reasoning_effort=route.reasoning_effort or "",
-                success=True,
-                latency_ms=(time.perf_counter() - start) * 1000,
-            )
-        )
+        self._record(self._call_record(route, "mock", route.model, start, success=True))
         return result
 
     def _complete(self, route: Route, messages: List[Dict[str, str]], escalated: bool = False) -> Completion:
-        candidates = [(route.provider, route.model)]
-        fallback_model = self.settings.llm_fallback_model.strip()
-        if self.settings.llm_route_fallback_enabled and fallback_model:
-            fallback = (normalize_provider(self.settings.llm_fallback_provider) or route.provider, fallback_model)
-            if fallback not in candidates:
-                candidates.append(fallback)
+        """Call the route's model, then the global fallback model, recording every attempt."""
+        candidates = self._candidates(route)
         for idx, (provider, model) in enumerate(candidates):
             start = time.perf_counter()
             try:
@@ -325,45 +310,43 @@ class ModelRouter:
                     max_tokens=route.max_tokens,
                 )
             except Exception as exc:
-                self._record(
-                    CallRecord(
-                        task=route.task,
-                        tier=route.tier.value,
-                        difficulty=route.difficulty.label,
-                        provider=provider,
-                        model=model,
-                        reasoning_effort=route.reasoning_effort or "",
-                        success=False,
-                        latency_ms=(time.perf_counter() - start) * 1000,
-                        escalated=escalated,
-                        fallback=idx > 0,
-                        error=f"{type(exc).__name__}: {exc}"[:300],
-                    )
-                )
+                error = f"{type(exc).__name__}: {exc}"[:300]
+                self._record(self._call_record(route, provider, model, start, success=False, escalated=escalated, fallback=idx > 0, error=error))
                 if idx == len(candidates) - 1:
                     raise
                 continue
             cost = completion.cost_usd or self.estimate_cost(completion.prompt_tokens, completion.completion_tokens, completion.model, model)
             self._record(
-                CallRecord(
-                    task=route.task,
-                    tier=route.tier.value,
-                    difficulty=route.difficulty.label,
-                    provider=provider,
-                    model=model,
-                    reasoning_effort=route.reasoning_effort or "",
-                    success=True,
-                    latency_ms=(time.perf_counter() - start) * 1000,
-                    escalated=escalated,
-                    fallback=idx > 0,
-                    prompt_tokens=completion.prompt_tokens,
-                    completion_tokens=completion.completion_tokens,
-                    total_tokens=completion.total_tokens,
-                    cost_usd=cost,
+                self._call_record(
+                    route, provider, model, start, success=True, escalated=escalated, fallback=idx > 0,
+                    prompt_tokens=completion.prompt_tokens, completion_tokens=completion.completion_tokens,
+                    total_tokens=completion.total_tokens, cost_usd=cost,
                 )
             )
             return completion
         raise RuntimeError("No completion route available.")
+
+    def _candidates(self, route: Route) -> List[tuple[str, str]]:
+        candidates = [(route.provider, route.model)]
+        fallback_model = self.settings.llm_fallback_model.strip()
+        if self.settings.llm_route_fallback_enabled and fallback_model:
+            fallback = (normalize_provider(self.settings.llm_fallback_provider) or route.provider, fallback_model)
+            if fallback not in candidates:
+                candidates.append(fallback)
+        return candidates
+
+    @staticmethod
+    def _call_record(route: Route, provider: str, model: str, start: float, **fields: Any) -> CallRecord:
+        return CallRecord(
+            task=route.task,
+            tier=route.tier.value,
+            difficulty=route.difficulty.label,
+            provider=provider,
+            model=model,
+            reasoning_effort=route.reasoning_effort or "",
+            latency_ms=(time.perf_counter() - start) * 1000,
+            **fields,
+        )
 
     def estimate_cost(self, prompt_tokens: int, completion_tokens: int, *models: str) -> float:
         """Price tokens by the first known model name (served names carry a date suffix)."""
