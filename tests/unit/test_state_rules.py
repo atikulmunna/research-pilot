@@ -162,3 +162,22 @@ def test_a_persistent_lock_raises_and_leaves_no_temp_file(state, monkeypatch):
     with pytest.raises(PermissionError):
         state.store.write_text("notes/locked.txt", "lost")
     assert not list(state.store.path("notes").glob("*.tmp"))
+
+
+def test_reads_retry_while_the_file_is_being_replaced(state, monkeypatch):
+    from pathlib import Path
+
+    from research_pilot.state import store as store_module
+
+    state.store.write_text("notes/read.txt", "saved")
+    real_read, calls = Path.read_text, []
+
+    def locked_twice(self, *args, **kwargs):
+        calls.append(self.name)
+        if len(calls) <= 2:
+            raise PermissionError("being replaced by a writer")
+        return real_read(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", locked_twice)
+    monkeypatch.setattr(store_module.time, "sleep", lambda _: None)
+    assert state.store.read_text("notes/read.txt") == "saved" and len(calls) == 3
