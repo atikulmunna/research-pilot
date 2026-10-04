@@ -272,6 +272,36 @@ def experiments_ingest(project: str, run_id: str, results_file: Path):
     typer.echo(f"Resume with: research-pilot run {store.root.name}")
 
 
+@experiments_app.command("fix")
+def experiments_fix(
+    project: str,
+    run_id: str,
+    script: Path = typer.Argument(..., exists=True, dir_okay=False, help="Your fixed copy of the run's run.py."),
+    reason: str = typer.Option(..., "--reason", help="What was wrong and what you changed; recorded on the run as a deviation."),
+):
+    """Install a reviewed fix to a run's script before you execute it. The original is kept and the change is logged."""
+    settings = _settings()
+    store = _open(project, settings)
+    registry = ResearchState(store, settings).experiments
+    run = registry.run(run_id)
+    problem = ""
+    if run is None or run.status != "awaiting_execution":
+        problem = f"{run_id} is not awaiting execution."
+    elif not reason.strip():
+        problem = "Give a non-empty --reason; it is recorded on the run."
+    elif script.resolve() == store.path(f"{registry.run_dir(run.id)}/run.py").resolve():
+        problem = "Pass an edited copy, not run.py itself: the original must stay unchanged so it can be archived."
+    elif not script.read_text(encoding="utf-8").strip():
+        problem = f"{script} is empty."
+    if problem:
+        typer.echo(problem, err=True)
+        raise typer.Exit(code=1)
+    archived = f"run.attempt{len(run.attempts)}.py"
+    run = registry.update_code(run, script.read_text(encoding="utf-8"), deviation=f"reviewer code repair before execution: {reason.strip()}")
+    typer.echo(f"{run.id}: script replaced (code version {run.code_version}); the original is kept as {archived}.")
+    typer.echo("Run it, then ingest the results with: research-pilot experiments ingest")
+
+
 @experiments_app.command("execute")
 def experiments_execute(project: str, run_id: str, timeout: int = typer.Option(900, help="Seconds per seed.")):
     """Run a generated experiment locally (you are responsible for reviewing its code first)."""

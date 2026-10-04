@@ -1,5 +1,6 @@
 import json
 import time
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 from typer.testing import CliRunner
@@ -99,3 +100,27 @@ def test_cli_end_to_end(tmp_path, monkeypatch):
     exported = runner.invoke(cli_app, ["export", "latest", "--to", "html", "--output", str(out)])
     assert exported.exit_code == 0 and out.read_text(encoding="utf-8").startswith("<!doctype html>")
     assert "graph-neural" in runner.invoke(cli_app, ["projects"]).output
+
+
+def test_cli_records_a_reviewed_script_fix(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    for key, value in {"LLM_PROVIDER": "mock", "LLM_MODEL": "mock", "LITERATURE_PROVIDERS": "mock", "EXPERIMENT_EXECUTOR": "manual", "WORKSPACE_DIR": str(tmp_path / "ws")}.items():
+        monkeypatch.setenv(key, value)
+    runner = CliRunner()
+    assert runner.invoke(cli_app, ["new", "manual experiments with fixes", "--run", "--quiet"]).exit_code == 0
+    run = next(r for r in json.loads(runner.invoke(cli_app, ["experiments", "list", "latest", "--json"]).output) if r["status"] == "awaiting_execution")
+    run_dir = Path(run["dir"])
+    original = (run_dir / "run.py").read_text(encoding="utf-8")
+    fixed = tmp_path / "fixed_run.py"
+    fixed.write_text(original + "\n# reviewer fix\n", encoding="utf-8")
+
+    in_place = runner.invoke(cli_app, ["experiments", "fix", "latest", run["run"], str(run_dir / "run.py"), "--reason", "x"])
+    assert in_place.exit_code == 1 and "edited copy" in in_place.output
+    assert runner.invoke(cli_app, ["experiments", "fix", "latest", run["run"], str(fixed), "--reason", "  "]).exit_code == 1
+    assert runner.invoke(cli_app, ["experiments", "fix", "latest", "R999", str(fixed), "--reason", "x"]).exit_code == 1
+
+    done = runner.invoke(cli_app, ["experiments", "fix", "latest", run["run"], str(fixed), "--reason", "grid allowed eps=0 in the LS arm"])
+    assert done.exit_code == 0, done.output
+    assert (run_dir / "run.py").read_text(encoding="utf-8").endswith("# reviewer fix\n")
+    assert (run_dir / "run.attempt0.py").read_text(encoding="utf-8") == original
+    assert "reviewer code repair before execution: grid allowed eps=0 in the LS arm" in (run_dir / "run.yaml").read_text(encoding="utf-8")
