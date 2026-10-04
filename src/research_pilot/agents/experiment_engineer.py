@@ -6,7 +6,9 @@ from .experiment_designer import SPEC_EXCLUDE
 
 CONTRACT = f"""Script contract (mandatory):
 - Invocation: python run.py --seed <int> --output-dir <path>
-- Seed every source of randomness from --seed. Write any artifacts (plots, checkpoints) under --output-dir.
+- One invocation is one independent replicate. The swarm runs the script once per seed and computes statistics across
+  seeds, so draw all data, splits and initialisations from --seed and never loop over replicate seeds inside the script.
+- Write any artifacts (plots, checkpoints) under --output-dir with the seed in each file name; seeds share that directory.
 - For EVERY arm (the method arm and each baseline arm, using the exact arm names) print exactly one line to stdout:
   {RESULT_PREFIX} {{"arm": "<arm name>", "seed": <seed>, "metrics": {{"<metric name>": <float>, ...}}}}
 - Report every metric named in the spec, using the exact metric names.
