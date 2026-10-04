@@ -89,5 +89,6 @@ def test_planner_hints_a_primary_design_when_only_validation_exists(mock_setting
         return [h for h in hints if h.type == "DESIGN_EXPERIMENT" and h.target == "H1" and "no primary experiment" in h.rationale]
 
     assert untested(planner.hints({"runs_left": 5}))
+    assert not untested(planner.hints({"runs_left": 0})), "a primary design is pointless when no run is left"
     state.add_experiment(ExperimentSpec(hypothesis_id="H1", kind="primary", objective="test", method="m", baselines=["b"], metrics=[MetricSpec(name="acc")]))
     assert not untested(planner.hints({"runs_left": 5}))
