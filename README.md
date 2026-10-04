@@ -6,6 +6,8 @@ Model calls are **routed by task difficulty, not by agent**. Searching, extracti
 
 ![Research Pilot architecture: twelve agents, the orchestrator, the shared research state, the evidence graph and the experiment registry](resources/architecture.png)
 
+To see what a real project produces, look at the [label-smoothing example](examples/label-smoothing/README.md): its manuscript, final review and reproducibility record, published as generated.
+
 This README is the user manual. If you are new, read [What you need](#what-you-need), [Install and configure](#install-and-configure) and [Your first project](#your-first-project), then keep [Running experiments](#running-experiments) open while your project runs.
 
 ## Contents
@@ -275,7 +277,7 @@ Results stay on your machine: `projects/` is listed in `.gitignore`, so nothing 
 - **Manuscript as a web page:** `research-pilot export <project> --to html --output paper.html`, then open the file in a browser. The Markdown source is `projects/<project>/paper/manuscript/manuscript.md`.
 - **Everything else:** the YAML and Markdown files in the project folder, described below.
 
-To share a project, send the exported HTML, or zip the project folder; anyone with Research Pilot installed can open a copied folder by placing it in their own `WORKSPACE_DIR`.
+The [label-smoothing example](examples/label-smoothing/README.md) shows what these files look like for a finished project. To share a project, send the exported HTML, or zip the project folder; anyone with Research Pilot installed can open a copied folder by placing it in their own `WORKSPACE_DIR`.
 
 ### The project folder
 
