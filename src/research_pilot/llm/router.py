@@ -9,7 +9,7 @@ import json
 import logging
 import re
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from threading import Lock
 from typing import Any, Callable, Dict, List, Type, TypeVar
 
@@ -395,17 +395,6 @@ class ModelRouter:
             except Exception as exc:
                 log.warning("call listener failed: %s", exc)
 
-    def usage_by_tier(self) -> Dict[str, Dict[str, float]]:
-        out: Dict[str, Dict[str, float]] = {}
-        with self._lock:
-            for row in self.metrics.values():
-                tier = out.setdefault(row["tier"], {"calls": 0, "total_tokens": 0, "cost_usd": 0.0, "escalations": 0})
-                tier["calls"] += row["calls"]
-                tier["total_tokens"] += row["total_tokens"]
-                tier["cost_usd"] += row["cost_usd"]
-                tier["escalations"] += row["escalations"]
-        return out
-
 
 def _unwrap(data: Dict[str, Any], schema: Type[BaseModel]) -> Dict[str, Any]:
     fields = set(schema.model_fields)
@@ -416,7 +405,3 @@ def _unwrap(data: Dict[str, Any], schema: Type[BaseModel]) -> Dict[str, Any]:
         if isinstance(inner, dict) and set(inner) & fields:
             return inner
     return data
-
-
-def call_record_dict(record: CallRecord) -> Dict[str, Any]:
-    return asdict(record)

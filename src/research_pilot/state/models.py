@@ -122,8 +122,6 @@ Priority = Annotated[int, BeforeValidator(_priority)]
 STRENGTHS = ("none", "weak", "moderate", "strong")
 Strength = Annotated[Literal[STRENGTHS], _choice(STRENGTHS, "weak", {"medium": "moderate", "high": "strong", "low": "weak"})]
 
-EVIDENCE_STATES = ("SUPPORTED", "PARTIALLY_SUPPORTED", "HYPOTHESIS", "SPECULATION", "CONTRADICTED", "UNKNOWN")
-
 
 class Model(BaseModel):
     model_config = ConfigDict(extra="ignore", populate_by_name=True)

@@ -56,7 +56,7 @@ def test_lite_failure_escalates_to_standard():
     out = router.json("field.search_queries", "s", "u", QueryPlan)
     assert out.queries == ["x"]
     assert client.calls[-1]["model"] == "standard-m"
-    assert router.usage_by_tier()["standard"]["escalations"] == 1
+    assert sum(row["escalations"] for row in router.metrics.values() if row["tier"] == "standard") == 1
 
 
 def test_standard_failure_escalates_to_strong():
@@ -64,7 +64,7 @@ def test_standard_failure_escalates_to_strong():
     router = ModelRouter(settings(), client=client)
     router.json("gap.discovery", "s", "u", GapAnalysis)
     assert [c["model"] for c in client.calls] == ["standard-m", "lite-m", "strong-m"]
-    assert router.usage_by_tier()["strong"]["escalations"] == 1
+    assert sum(row["escalations"] for row in router.metrics.values() if row["tier"] == "strong") == 1
 
 
 def test_escalation_can_be_disabled():
