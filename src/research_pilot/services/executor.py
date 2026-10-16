@@ -24,7 +24,7 @@ import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable, List
+from typing import Dict, Iterable, List, Tuple
 
 from ..state.models import ExperimentSpec, RunRecord
 
@@ -39,34 +39,50 @@ class ExecutionOutcome:
     duration_s: float = 0.0
     error: str = ""
     artifacts: List[str] = field(default_factory=list)
+    problems: List[str] = field(default_factory=list)
 
 
-def parse_result_lines(lines: Iterable[str]) -> List[RunRecord]:
+def parse_result_lines(lines: Iterable[str]) -> Tuple[List[RunRecord], List[str]]:
+    """Result records, plus a problem for every RESULT_JSON line or metric value that had to be dropped.
+
+    Other output, including JSON lines that are not result records, is ignored without a problem.
+    """
     records: List[RunRecord] = []
-    for line in lines:
+    problems: List[str] = []
+    for number, line in enumerate(lines, start=1):
         text = line.strip()
-        if text.startswith(RESULT_PREFIX):
+        marked = text.startswith(RESULT_PREFIX)
+        if marked:
             text = text[len(RESULT_PREFIX) :].strip()
         elif not text.startswith("{"):
             continue
+        record, issues = _parse_record(text)
+        if record is not None:
+            records.append(record)
+        if record is not None or marked:
+            problems.extend(f"result line {number}: {issue}" for issue in issues)
+    return records, problems
+
+
+def _parse_record(text: str) -> Tuple[RunRecord | None, List[str]]:
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        return None, [f"ignored, not valid JSON ({exc.msg})"]
+    if not isinstance(data, dict) or "arm" not in data or "metrics" not in data:
+        return None, ["ignored, a result needs 'arm' and 'metrics'"]
+    metrics: Dict[str, float] = {}
+    issues: List[str] = []
+    for key, value in (data.get("metrics") or {}).items():
         try:
-            data = json.loads(text)
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(data, dict) or "arm" not in data or "metrics" not in data:
-            continue
-        metrics = {}
-        for key, value in (data.get("metrics") or {}).items():
-            try:
-                metrics[str(key)] = float(value)
-            except (TypeError, ValueError):
-                continue
-        records.append(RunRecord(arm=str(data["arm"]), seed=int(data.get("seed", 0)), metrics=metrics))
-    return records
+            metrics[str(key)] = float(value)
+        except (TypeError, ValueError):
+            issues.append(f"metric '{key}' of arm '{data['arm']}' dropped, not a number: {value!r:.40}")
+    return RunRecord(arm=str(data["arm"]), seed=int(data.get("seed", 0)), metrics=metrics), issues
 
 
-def load_records(text: str) -> List[RunRecord]:
-    """Parse ingested results: RESULT_JSON lines, JSON lines, a JSON list, or {"records": [...]}."""
+def load_records(text: str) -> Tuple[List[RunRecord], List[str]]:
+    """Parse ingested results: RESULT_JSON lines, JSON lines, a JSON list, or {"records": [...]}; see parse_result_lines."""
     stripped = (text or "").strip()
     if stripped[:1] in "[{":
         try:
@@ -76,7 +92,8 @@ def load_records(text: str) -> List[RunRecord]:
         if isinstance(data, dict) and "records" in data:
             data = data["records"]
         if isinstance(data, list):
-            return parse_result_lines(json.dumps(item) for item in data)
+            # Every item of a records list is meant as a result, so an unusable one is reported.
+            return parse_result_lines(f"{RESULT_PREFIX} {json.dumps(item)}" for item in data)
     return parse_result_lines(stripped.splitlines())
 
 
@@ -138,6 +155,7 @@ class SubprocessExecutor:
         artifacts = run_dir / "artifacts"
         artifacts.mkdir(parents=True, exist_ok=True)
         records: List[RunRecord] = []
+        problems: List[str] = []
         start = time.perf_counter()
         for seed in seeds:
             try:
@@ -157,12 +175,13 @@ class SubprocessExecutor:
             if proc.returncode != 0:
                 tail = "\n".join(proc.stderr.strip().splitlines()[-25:])
                 return ExecutionOutcome(status="failed", records=records, duration_s=time.perf_counter() - start, error=f"seed {seed}: exit {proc.returncode}\n{tail}")
-            seed_records = parse_result_lines(proc.stdout.splitlines())
+            seed_records, seed_problems = parse_result_lines(proc.stdout.splitlines())
+            problems.extend(f"seed {seed}, {problem}" for problem in seed_problems)
             if not seed_records:
                 return ExecutionOutcome(status="failed", records=records, duration_s=time.perf_counter() - start, error=f"seed {seed}: no {RESULT_PREFIX} lines in output")
             records.extend(seed_records)
         produced = sorted(str(p.relative_to(run_dir)) for p in artifacts.rglob("*") if p.is_file())
-        return ExecutionOutcome(status="completed", records=records, duration_s=time.perf_counter() - start, artifacts=produced)
+        return ExecutionOutcome(status="completed", records=records, duration_s=time.perf_counter() - start, artifacts=produced, problems=problems)
 
 
 class SimulatedExecutor:

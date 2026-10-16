@@ -211,12 +211,14 @@ class ProjectStore:
         if not path.exists():
             return []
         rows = []
-        for line in read_with_retry(path).splitlines():
-            if line.strip():
-                try:
-                    rows.append(json.loads(line))
-                except json.JSONDecodeError:
-                    continue
+        for number, line in enumerate(read_with_retry(path).splitlines(), start=1):
+            if not line.strip():
+                continue
+            try:
+                rows.append(json.loads(line))
+            except json.JSONDecodeError as exc:
+                # An append cut short by a crash leaves a partial line; the rest of the log is still valid.
+                log.warning("skipped unreadable line %d of %s: %s", number, rel, exc.msg)
         return rows[-limit:] if limit else rows
 
     def _load_list(self, rel: str, model: Type[M]) -> List[M]:

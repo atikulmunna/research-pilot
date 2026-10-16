@@ -213,14 +213,14 @@ def routing_table(settings: Settings) -> List[Dict[str, Any]]:
     return ModelRouter(settings).routing_table()
 
 
-def ingest_results(store: ProjectStore, settings: Settings, run_id: str, text: str) -> Dict[str, Any]:
+def ingest_results(store: ProjectStore, settings: Settings, run_id: str, text: str, extra_problems: List[str] | None = None) -> Dict[str, Any]:
     state = _state(store, settings)
     registry = state.experiments
     run = registry.run(run_id)
     if run is None:
         raise KeyError(f"Unknown run: {run_id}")
-    records = load_records(text)
+    records, problems = load_records(text)
     spec = registry.spec(run.spec_key)
-    problems = check_coverage(spec, run.seeds, records) if spec else []
+    problems = [*(extra_problems or []), *problems, *(check_coverage(spec, run.seeds, records) if spec else [])]
     run = registry.ingest(run_id, records, problems)
     return {"run_id": run.id, "status": run.status, "records": len(run.records), "problems": problems, "synthetic": run.synthetic}

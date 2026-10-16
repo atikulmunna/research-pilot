@@ -82,7 +82,9 @@ def test_manual_execution_pauses_and_resumes(mock_settings):
     for seed in run.seeds:
         out = subprocess.run([sys.executable, "run.py", "--seed", str(seed), "--output-dir", "artifacts"], cwd=run_dir, capture_output=True, text=True, check=True)
         lines += out.stdout.splitlines()
-    ingested = state.experiments.ingest(run.id, parse_result_lines(lines), [])
+    records, problems = parse_result_lines(lines)
+    assert not problems
+    ingested = state.experiments.ingest(run.id, records, problems)
     assert ingested.synthetic, "results of mock-generated code stay synthetic"
     project = Orchestrator(settings, store).run()
     assert store.quant_result(run.id) is not None and store.interpretation(run.id) is not None
