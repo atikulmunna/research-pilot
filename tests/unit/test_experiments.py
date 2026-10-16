@@ -30,11 +30,22 @@ def script_for(spec):
 
 
 def test_parse_and_load_records():
-    lines = ["noise", 'RESULT_JSON: {"arm": "a", "seed": 1, "metrics": {"acc": "0.5", "bad": "x"}}', '{"arm": "b", "seed": 1, "metrics": {}}']
-    records = parse_result_lines(lines)
+    lines = [
+        "noise",
+        'RESULT_JSON: {"arm": "a", "seed": 1, "metrics": {"acc": "0.5", "bad": "x"}}',
+        '{"arm": "b", "seed": 1, "metrics": {}}',
+        '{"config": "a JSON line the script printed, not a result"}',
+        "RESULT_JSON: {broken",
+        'RESULT_JSON: {"seed": 2, "metrics": {}}',
+    ]
+    records, problems = parse_result_lines(lines)
     assert [(r.arm, r.metrics) for r in records] == [("a", {"acc": 0.5}), ("b", {})]
-    as_list = load_records(json.dumps({"records": [{"arm": "a", "seed": 0, "metrics": {"acc": 1}}]}))
-    assert as_list[0].metrics == {"acc": 1.0}
+    assert problems[0] == "result line 2: metric 'bad' of arm 'a' dropped, not a number: 'x'"
+    assert problems[1].startswith("result line 5: ignored, not valid JSON")
+    assert problems[2:] == ["result line 6: ignored, a result needs 'arm' and 'metrics'"]
+    as_list, list_problems = load_records(json.dumps({"records": [{"arm": "a", "seed": 0, "metrics": {"acc": 1}}, {"seed": 1}]}))
+    assert [r.metrics for r in as_list] == [{"acc": 1.0}]
+    assert list_problems == ["result line 2: ignored, a result needs 'arm' and 'metrics'"]
 
 
 def test_coverage_reports_missing_seeds_and_metrics():
@@ -50,6 +61,24 @@ def test_subprocess_executor_runs_generated_script(tmp_path):
     assert outcome.status == "completed", outcome.error
     assert len(outcome.records) == 6 and not outcome.synthetic
     assert (tmp_path / "stdout.log").exists()
+
+
+def test_subprocess_executor_reports_dropped_result_lines(tmp_path):
+    script = "\n".join(
+        [
+            "import argparse, json",
+            "parser = argparse.ArgumentParser()",
+            "parser.add_argument('--seed', type=int)",
+            "parser.add_argument('--output-dir')",
+            "args = parser.parse_args()",
+            "print('RESULT_JSON: ' + json.dumps({'arm': 'proposed', 'seed': args.seed, 'metrics': {'acc': 0.9}}))",
+            "print('RESULT_JSON: {not json')",
+        ]
+    )
+    (tmp_path / "run.py").write_text(script, encoding="utf-8")
+    outcome = SubprocessExecutor(timeout_s=60, python=sys.executable).execute(tmp_path, SPEC, [0], "R001")
+    assert outcome.status == "completed" and len(outcome.records) == 1
+    assert len(outcome.problems) == 1 and outcome.problems[0].startswith("seed 0, result line 2: ignored, not valid JSON")
 
 
 def test_subprocess_executor_reports_failures(tmp_path):

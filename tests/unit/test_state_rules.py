@@ -181,3 +181,32 @@ def test_reads_retry_while_the_file_is_being_replaced(state, monkeypatch):
     monkeypatch.setattr(Path, "read_text", locked_twice)
     monkeypatch.setattr(store_module.time, "sleep", lambda _: None)
     assert state.store.read_text("notes/read.txt") == "saved" and len(calls) == 3
+
+
+def test_ingest_records_dropped_result_values_on_the_run(state):
+    from research_pilot import views
+
+    state.add_hypothesis(Hypothesis(statement="h"))
+    state.add_experiment(spec())
+    run = state.experiments.create_run(state.approve_experiment("E1"), "print()", "manual", [0])
+    state.experiments.mark(run, "awaiting_execution")
+    text = "\n".join(
+        [
+            'RESULT_JSON: {"arm": "m", "seed": 0, "metrics": {"acc": 0.9}}',
+            'RESULT_JSON: {"arm": "b", "seed": 0, "metrics": {"acc": "n/a"}}',
+        ]
+    )
+    info = views.ingest_results(state.store, state.settings, run.id, text)
+    dropped = "result line 2: metric 'acc' of arm 'b' dropped, not a number: 'n/a'"
+    assert dropped in info["problems"]
+    assert f"incomplete results: {dropped}" in state.experiments.run(run.id).deviations
+
+
+def test_unreadable_log_lines_are_skipped_with_a_warning(state, caplog):
+    path = state.store.path("logs/check.jsonl")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(['{"event": "first"}', '{"event": "cut sho', '{"event": "third"}']) + "\n", encoding="utf-8")
+    with caplog.at_level("WARNING"):
+        rows = state.store.read_jsonl("logs/check.jsonl")
+    assert [r["event"] for r in rows] == ["first", "third"]
+    assert "skipped unreadable line 2 of logs/check.jsonl" in caplog.text

@@ -319,8 +319,10 @@ def experiments_execute(project: str, run_id: str, timeout: int = typer.Option(9
         typer.echo(f"Execution failed:\n{outcome.error}", err=True)
         raise typer.Exit(code=1)
     lines = "\n".join(r.model_dump_json() for r in outcome.records)
-    info = views.ingest_results(store, settings, run_id, lines)
+    info = views.ingest_results(store, settings, run_id, lines, extra_problems=outcome.problems)
     typer.echo(f"{run_id} completed with {info['records']} records. Resume with: research-pilot run {store.root.name}")
+    for problem in info["problems"]:
+        typer.echo(f"  warning: {problem}")
 
 
 def main() -> None:

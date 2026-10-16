@@ -111,7 +111,7 @@ class ExperimentEngineer(Agent):
 
     def _completed(self, task: TaskEnvelope, run: ExperimentRun, outcome: ExecutionOutcome, synthetic_code: bool, spec: ExperimentSpec):
         registry = self.state.experiments
-        for problem in check_coverage(spec, run.seeds, outcome.records):
+        for problem in [*outcome.problems, *check_coverage(spec, run.seeds, outcome.records)]:
             run.deviations.append(f"incomplete results: {problem}")
         run = registry.record_attempt(run, "completed", duration_s=outcome.duration_s)
         run = registry.complete(run, outcome.records, synthetic=outcome.synthetic or synthetic_code, duration_s=outcome.duration_s, artifacts=outcome.artifacts)
