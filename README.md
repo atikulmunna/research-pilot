@@ -209,7 +209,7 @@ Every project has hard budgets, and all of them are **cumulative across resumes*
 
 | Budget | Setting | When it is reached |
 |---|---|---|
-| Cost | `MAX_COST_USD` | The project stops with outcome `budget_exhausted`. When $0.75 is left, the orchestrator writes and reviews the manuscript before anything else, so a stop always leaves a reviewed draft. |
+| Cost | `MAX_COST_USD` | The project stops with outcome `budget_exhausted`. When the write-up reserve is all that is left, the orchestrator writes and reviews the manuscript before anything else. The reserve is $0.75, or 1.25 times the project's last recorded cost of drafting and reviewing if that is higher, so a long manuscript cannot squeeze out the review. |
 | Steps | `MAX_STEPS`, or `run --max-steps N` | The project stops with outcome `step_limit`. A step is one orchestrator action; two steps before the limit the manuscript is written. |
 | Experiment runs | `MAX_EXPERIMENT_RUNS`, `MAX_RUNS_PER_SPEC` | The planner stops proposing runs. |
 | Review rounds | `MAX_REVIEW_ROUNDS` | Further red-team rounds stop; a final review still runs at the end. |

@@ -36,6 +36,9 @@ SIGNIFICANT = {
 log = logging.getLogger(__name__)
 # Cost kept in reserve so the manuscript can still be drafted and reviewed (about one draft and one review).
 ENDGAME_RESERVE_USD = 0.75
+# The reserve must cover one more write-up and review; recorded costs of those tasks, with a margin, raise it.
+WRITEUP_TASKS = ("paper.claims", "paper.drafting", "text.rewriting", "review.simulation")
+WRITEUP_MARGIN = 1.25
 # Share of the token budget after which the manuscript is written before anything else.
 ENDGAME_SHARE = 0.7
 
@@ -645,7 +648,7 @@ class Orchestrator:
         missing = "no manuscript yet" if not self.store.manuscript() else "the manuscript predates the latest results"
         if limit - self.project.step <= 2:
             reason = f"{limit - self.project.step} step(s) left and {missing}"
-        elif s.max_cost_usd and s.max_cost_usd - usage.cost_usd <= ENDGAME_RESERVE_USD:
+        elif s.max_cost_usd and s.max_cost_usd - usage.cost_usd <= self._endgame_reserve():
             reason = f"${s.max_cost_usd - usage.cost_usd:.2f} of the ${s.max_cost_usd:.2f} cost budget left and {missing}"
         elif s.max_total_tokens and usage.total_tokens >= ENDGAME_SHARE * s.max_total_tokens:
             reason = f"{usage.total_tokens} of {s.max_total_tokens} budgeted tokens used and {missing}"
@@ -658,6 +661,15 @@ class Orchestrator:
             effects=["remaining research actions are deferred"],
         )
         self._insert_front([self._new("WRITE_PAPER", final=True)])
+
+    def _endgame_reserve(self) -> float:
+        """Budget kept for the final write-up and review: the fixed floor, or the last recorded cost of each
+        write-up task with a margin when that is higher, so a large manuscript cannot squeeze out the review."""
+        last: Dict[str, float] = {}
+        for call in self.store.llm_calls():
+            if call.get("success") and call.get("task") in WRITEUP_TASKS:
+                last[call["task"]] = float(call.get("cost_usd", 0.0))
+        return max(ENDGAME_RESERVE_USD, WRITEUP_MARGIN * sum(last.values()))
 
     def _finalize(self, outcome: str, reason: str) -> None:
         completion = self._completion_check()

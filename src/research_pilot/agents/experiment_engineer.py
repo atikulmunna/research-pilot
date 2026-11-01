@@ -1,3 +1,4 @@
+import re
 from typing import List
 
 from ..llm.json_utils import extract_code_block, parse_json_object
@@ -5,6 +6,9 @@ from ..services.executor import RESULT_PREFIX, ExecutionOutcome, check_coverage
 from ..state.models import ExperimentRun, ExperimentSpec, ImplementationNotes, TaskEnvelope
 from .base import Agent, as_yaml, clip
 from .experiment_designer import SPEC_EXCLUDE
+
+EXPERIMENT_REF = re.compile(r"\bE\d+\b")
+MAX_LISTED_ARTIFACTS = 6
 
 CONTRACT = f"""Script contract (mandatory):
 - Invocation: python run.py --seed <int> --output-dir <path>
@@ -58,7 +62,8 @@ class ExperimentEngineer(Agent):
         route = self.router.resolve("experiment.coding")
         text = self.ask_text(
             "experiment.coding",
-            f"{self.project_block()}\n\nApproved experiment spec ({spec.key}):\n{as_yaml(spec.model_dump(exclude=SPEC_EXCLUDE))}\n\n{CONTRACT}{failure_note}",
+            f"{self.project_block()}\n\nApproved experiment spec ({spec.key}):\n{as_yaml(spec.model_dump(exclude=SPEC_EXCLUDE))}\n\n"
+            f"{CONTRACT}{self._earlier_outputs(spec)}{failure_note}",
             {"spec": spec.model_dump(mode="json")},
         )
         notes = ImplementationNotes.model_validate(parse_json_object(text.split("```python", 1)[-1]) or {})
@@ -73,6 +78,27 @@ class ExperimentEngineer(Agent):
             deviations=[f"declared by engineer: {d}" for d in notes.deviations],
             code_generator=f"{route.provider}/{route.model}",
         )
+
+    def _earlier_outputs(self, spec: ExperimentSpec) -> str:
+        """Completed runs of the experiments this spec refers to, with their artifact files, so a dependent script can
+        load them (for example a grid or labels a gate run locked) instead of reconstructing them."""
+        mentioned = set(EXPERIMENT_REF.findall(spec.model_dump_json())) - {spec.id}
+        runs = [r for r in self.state.experiments.runs() if r.experiment_id in mentioned and r.status == "completed"]
+        lines = [self._run_outputs(run) for run in runs]
+        if not lines:
+            return ""
+        return (
+            "\n\nOutputs of earlier runs this experiment refers to. They are read-only; load what the spec needs from them "
+            "rather than reconstructing it. Paths are relative to the run directory, which is the working directory when the "
+            "script runs.\n" + "\n".join(lines)
+        )
+
+    def _run_outputs(self, run: ExperimentRun) -> str:
+        folder = self.store.path(f"{self.state.experiments.run_dir(run.id)}/artifacts")
+        files = sorted(p.name for p in folder.glob("*") if p.is_file()) if folder.exists() else []
+        shown = ", ".join(f"../{run.id}/artifacts/{name}" for name in files[:MAX_LISTED_ARTIFACTS])
+        more = f", and {len(files) - MAX_LISTED_ARTIFACTS} more" if len(files) > MAX_LISTED_ARTIFACTS else ""
+        return f"- {run.id} ({run.spec_key}, {len(run.seeds)} seeds): {shown + more if files else 'no artifact files'}"
 
     def _execute(self, task: TaskEnvelope, run: ExperimentRun, spec: ExperimentSpec):
         """Run the script, repairing it after a failure up to the configured number of times."""

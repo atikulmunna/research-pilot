@@ -261,3 +261,38 @@ def test_operator_directive_queues_approved_runs_first_in_order(mock_settings):
     pending = [a for a in orchestrator.roadmap if a.status == "pending"]
     assert [(a.type, a.target, a.origin) for a in pending[:2]] == [("RUN_EXPERIMENT", "E2", "operator"), ("RUN_EXPERIMENT", "E1", "operator")]
     assert store.decisions()[-1].kind == "operator_directive"
+
+
+def test_endgame_reserve_grows_with_recorded_writeup_cost(mock_settings):
+    import pytest
+
+    settings = mock_settings(max_cost_usd=5.0)
+    store = create_project(settings, "costly write-ups")
+    spend(store, 3.5)
+    Orchestrator(settings, store)._maybe_endgame(limit=1000)
+    assert store.decisions() == [], "1.50 left is above the fixed 0.75 floor"
+    for task, cost in (("paper.drafting", 1.0), ("review.simulation", 0.2)):
+        store.append_jsonl("logs/llm_calls.jsonl", {"task": task, "success": True, "cost_usd": cost})
+    orchestrator = Orchestrator(settings, store)
+    assert orchestrator._endgame_reserve() == pytest.approx(1.5)
+    orchestrator._maybe_endgame(limit=1000)
+    assert [d.kind for d in store.decisions()] == ["endgame"]
+
+
+def test_engineer_is_shown_outputs_of_runs_the_spec_refers_to(mock_settings):
+    from research_pilot.agents.experiment_engineer import ExperimentEngineer
+
+    settings = mock_settings()
+    store = create_project(settings, "dependent experiments")
+    state = ResearchState(store, settings)
+    state.add_hypothesis(Hypothesis(statement="h"))
+    gate = state.add_experiment(ExperimentSpec(hypothesis_id="H1", kind="validation", objective="lock the grid", method="m", baselines=["b"], metrics=[MetricSpec(name="acc")]))
+    run = state.experiments.create_run(state.approve_experiment(gate.id), "print()", "manual", [0])
+    state.experiments.complete(run, [RunRecord(arm="m", seed=0, metrics={"acc": 1.0})], synthetic=False)
+    (store.path(f"experiments/runs/{run.id}/artifacts")).mkdir(parents=True, exist_ok=True)
+    store.path(f"experiments/runs/{run.id}/artifacts/grid_seed0.json").write_text("{}", encoding="utf-8")
+    dependent = state.add_experiment(ExperimentSpec(hypothesis_id="H1", objective="test H1 on the grid E1 locked", method="m", baselines=["b"], metrics=[MetricSpec(name="acc")]))
+    unrelated = state.add_experiment(ExperimentSpec(hypothesis_id="H1", objective="independent", method="m", baselines=["b"], metrics=[MetricSpec(name="acc")]))
+    engineer = ExperimentEngineer(AgentDeps(state, ModelRouter(settings), settings, None, None, None))
+    assert f"- {run.id} (E1@v1, 1 seeds): ../{run.id}/artifacts/grid_seed0.json" in engineer._earlier_outputs(dependent)
+    assert engineer._earlier_outputs(unrelated) == ""
