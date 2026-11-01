@@ -1,4 +1,4 @@
-> **Archived README of v1.** This describes the original version of the project: a linear LangGraph web-search report generator. Its code is preserved at commit [`7feabb3`](https://github.com/atikulmunna/research-pilot/tree/7feabb3). Paths and commands below refer to that version. The current system is described in the [main README](../README.md).
+> **Archived README of v1.** This describes the original version of the project: a linear LangGraph web-search report generator. Its code is preserved at commit [`d328d35`](https://github.com/atikulmunna/research-pilot/tree/d328d35). Paths and commands below refer to that version. The current system is described in the [main README](../README.md).
 
 # Research Assistant
 
