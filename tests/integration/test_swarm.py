@@ -242,3 +242,22 @@ def test_planner_sees_the_step_limit_of_the_current_run(mock_settings):
     orchestrator._task = lambda agent, kind, objective, inputs: budgets.append(inputs["budget"]) or SimpleNamespace(data={}, recommendations=[])
     orchestrator._do_plan(Action(type="PLAN"))
     assert budgets[0]["max_steps"] == 3
+
+
+def test_operator_directive_queues_approved_runs_first_in_order(mock_settings):
+    import pytest
+
+    settings = mock_settings()
+    store = create_project(settings, "operator directives")
+    state = ResearchState(store, settings)
+    state.add_hypothesis(Hypothesis(statement="h"))
+    for _ in range(2):
+        spec = state.add_experiment(ExperimentSpec(hypothesis_id="H1", objective="o", method="m", baselines=["b"], metrics=[MetricSpec(name="acc")]))
+        state.approve_experiment(spec.id)
+    orchestrator = Orchestrator(settings, store)
+    with pytest.raises(ValueError, match="E9"):
+        orchestrator.direct(["E2", "E9"])
+    orchestrator.direct(["E2", "E1"])
+    pending = [a for a in orchestrator.roadmap if a.status == "pending"]
+    assert [(a.type, a.target, a.origin) for a in pending[:2]] == [("RUN_EXPERIMENT", "E2", "operator"), ("RUN_EXPERIMENT", "E1", "operator")]
+    assert store.decisions()[-1].kind == "operator_directive"

@@ -304,6 +304,7 @@ projects/<project-id>/
 ## Continuing, pausing and recovering
 
 - **Resume** a paused, failed or awaiting project with `research-pilot run <project>`.
+- **Choose what runs next** with `--next`, for example `research-pilot run <project> --next E11 --next E12`. The approved experiments run first, in that order, and the planner takes over afterwards; the directive is recorded in the decision log.
 - **Continue a finished project**, for example after a budget stop, with `research-pilot run <project> --reopen`. It keeps all state, designs experiments for hypotheses that have none, then hands control to the planner. Raise the cumulative budgets first: `MAX_COST_USD` in `.env` or the environment, and `--max-steps` on the command line.
 - **Pause** a project started through the API with `POST /api/v1/projects/{id}/cancel`; it stops after the current step with status `paused`.
 - **Stop** a terminal run with Ctrl+C. State is written atomically, so nothing is corrupted; the next `research-pilot run <project>` re-queues the interrupted step and runs it again. The same applies after a crash or power loss.
@@ -361,7 +362,7 @@ The safety rules are enforced in code rather than left to prompts.
 | Command | What it does |
 |---|---|
 | `research-pilot new TOPIC [--question] [--proposal TEXT\|@file] [--seed-paper ID]... [--constraint TEXT]... [--title] [--run] [--max-steps N] [--quiet]` | Create a project, and with `--run` start it. |
-| `research-pilot run [PROJECT] [--max-steps N] [--reopen] [--quiet]` | Run or resume. `--max-steps` sets the total step limit; `--reopen` continues a finished project. |
+| `research-pilot run [PROJECT] [--max-steps N] [--reopen] [--next E#]... [--quiet]` | Run or resume. `--max-steps` sets the total step limit; `--reopen` continues a finished project; `--next` queues approved experiments to run first, in the order given. |
 | `research-pilot projects [--json]` | List projects in the workspace. |
 | `research-pilot status [PROJECT] [--json]` | Status, outcome, counts, cost by tier and completion checks. |
 | `research-pilot show PROJECT SECTION [--json]` | Print one part of the research state. Sections: `field`, `papers`, `literature`, `gaps`, `proposal`, `novelty`, `critique`, `hypotheses`, `experiments`, `analysis`, `decisions`, `roadmap`, `claims`, `reviews`, `qa`, `manuscript`, `activity`, `violations`. |

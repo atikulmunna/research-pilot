@@ -63,10 +63,12 @@ def _progress(event: Dict[str, Any]) -> None:
         typer.echo(f"  ! retrying {event['action_id']}: {event['error'][:150]}")
 
 
-def _run(store: ProjectStore, settings: Settings, max_steps: Optional[int], quiet: bool, reopen: bool = False) -> None:
+def _run(store: ProjectStore, settings: Settings, max_steps: Optional[int], quiet: bool, reopen: bool = False, next_runs: List[str] = ()) -> None:
     orchestrator = Orchestrator(settings, store, on_event=None if quiet else _progress)
     if reopen:
         orchestrator.reopen()
+    if next_runs:
+        _direct(orchestrator, next_runs)
     project = orchestrator.run(max_steps)
     typer.echo("")
     typer.echo(f"Project {project.id}: {project.status}" + (f" ({project.outcome})" if project.outcome else ""))
@@ -84,6 +86,17 @@ def _run(store: ProjectStore, settings: Settings, max_steps: Optional[int], quie
     if store.manuscript():
         typer.echo(f"Manuscript: {store.path('paper/manuscript/manuscript.md')}")
     if project.status == "failed":
+        raise typer.Exit(code=1)
+
+
+def _direct(orchestrator: Orchestrator, experiment_ids: List[str]) -> None:
+    if orchestrator.project.status == "completed":
+        typer.echo("The project is finished; add --reopen to continue it.", err=True)
+        raise typer.Exit(code=1)
+    try:
+        orchestrator.direct(experiment_ids)
+    except ValueError as exc:
+        typer.echo(f"Cannot queue runs: {exc}", err=True)
         raise typer.Exit(code=1)
 
 
@@ -115,10 +128,11 @@ def run(
     max_steps: Optional[int] = typer.Option(None, help="Override the total step budget."),
     quiet: bool = typer.Option(False, help="Hide live progress."),
     reopen: bool = typer.Option(False, "--reopen", help="Continue a finished project: design missing experiments, then plan."),
+    next_runs: Optional[List[str]] = typer.Option(None, "--next", help="Approved experiment to run next, such as E12 (repeatable, run in order)."),
 ):
     """Run or resume a project."""
     settings = _settings()
-    _run(_open(project, settings), settings, max_steps, quiet, reopen)
+    _run(_open(project, settings), settings, max_steps, quiet, reopen, next_runs or [])
 
 
 @app.command()

@@ -124,3 +124,23 @@ def test_cli_records_a_reviewed_script_fix(tmp_path, monkeypatch):
     assert (run_dir / "run.py").read_text(encoding="utf-8").endswith("# reviewer fix\n")
     assert (run_dir / "run.attempt0.py").read_text(encoding="utf-8") == original
     assert "reviewer code repair before execution: grid allowed eps=0 in the LS arm" in (run_dir / "run.yaml").read_text(encoding="utf-8")
+
+
+def test_cli_next_runs_a_chosen_experiment_first(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    for key, value in {"LLM_PROVIDER": "mock", "LLM_MODEL": "mock", "LITERATURE_PROVIDERS": "mock", "EXPERIMENT_EXECUTOR": "simulated", "WORKSPACE_DIR": str(tmp_path / "ws")}.items():
+        monkeypatch.setenv(key, value)
+    runner = CliRunner()
+    assert runner.invoke(cli_app, ["new", "directed experiments", "--run", "--quiet"]).exit_code == 0
+
+    finished = runner.invoke(cli_app, ["run", "latest", "--next", "E1", "--quiet"])
+    assert finished.exit_code == 1 and "--reopen" in finished.output
+    unknown = runner.invoke(cli_app, ["run", "latest", "--reopen", "--next", "E99", "--quiet"])
+    assert unknown.exit_code == 1 and "not approved experiments: E99" in unknown.output
+
+    directed = runner.invoke(cli_app, ["run", "latest", "--reopen", "--next", "E1", "--max-steps", "200", "--quiet"])
+    assert directed.exit_code == 0, directed.output
+    roadmap = json.loads(runner.invoke(cli_app, ["show", "latest", "roadmap", "--json"]).output)
+    actions = roadmap if isinstance(roadmap, list) else roadmap.get("actions", [])
+    operator = [a for a in actions if a.get("origin") == "operator"]
+    assert [(a["type"], a["target"], a["status"]) for a in operator] == [("RUN_EXPERIMENT", "E1", "done")]

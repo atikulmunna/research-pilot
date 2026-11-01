@@ -160,6 +160,20 @@ class Orchestrator:
         self._save_roadmap()
         self._save()
 
+    def direct(self, experiment_ids: List[str]) -> None:
+        """Queue approved experiments to run next, in the given order, as an operator directive; the planner continues afterwards."""
+        specs = [self.state.experiments.spec(ref) for ref in experiment_ids]
+        invalid = [ref for ref, spec in zip(experiment_ids, specs) if spec is None or spec.status != "approved"]
+        if invalid:
+            raise ValueError(f"not approved experiments: {', '.join(invalid)}")
+        self.state.log_decision(
+            "operator_directive",
+            "Run next: " + ", ".join(s.key for s in specs),
+            "requested by the user",
+            effects=["the planner continues after these runs"],
+        )
+        self._insert_front([self._new("RUN_EXPERIMENT", s.id, origin="operator", rationale="operator directive") for s in specs])
+
     def _prepare_resume(self, retry_failed: bool = False) -> bool:
         # An action still marked running was interrupted (the process was stopped); run it again.
         for action in self.roadmap:
