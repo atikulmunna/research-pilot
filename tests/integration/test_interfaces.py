@@ -144,3 +144,18 @@ def test_cli_next_runs_a_chosen_experiment_first(tmp_path, monkeypatch):
     actions = roadmap if isinstance(roadmap, list) else roadmap.get("actions", [])
     operator = [a for a in actions if a.get("origin") == "operator"]
     assert [(a["type"], a["target"], a["status"]) for a in operator] == [("RUN_EXPERIMENT", "E1", "done")]
+
+
+def test_cli_writes_utf8_when_output_is_redirected(monkeypatch):
+    import io
+    import sys
+
+    from research_pilot.cli import _utf8_output
+
+    out = io.BytesIO()
+    monkeypatch.setattr(sys, "stdout", io.TextIOWrapper(out, encoding="cp1252"))
+    monkeypatch.setattr(sys, "stderr", None)
+    _utf8_output()
+    print("s(0.2) − s(0.05)")
+    sys.stdout.flush()
+    assert out.getvalue().decode("utf-8").strip() == "s(0.2) − s(0.05)"

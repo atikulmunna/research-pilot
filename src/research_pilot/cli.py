@@ -1,4 +1,5 @@
 import json
+import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -339,7 +340,16 @@ def experiments_execute(project: str, run_id: str, timeout: int = typer.Option(9
         typer.echo(f"  warning: {problem}")
 
 
+def _utf8_output() -> None:
+    # Redirected output on Windows uses the locale code page, which cannot encode symbols that model-written text
+    # contains (for example U+2212), so the CLI always writes UTF-8. A stream is None under pythonw.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
+
+
 def main() -> None:
+    _utf8_output()
     app()
 
 
