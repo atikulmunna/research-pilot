@@ -149,6 +149,8 @@ python run.py --seed N --output-dir DIR
 - **One invocation is one independent replicate.** Data, splits and initialisation all come from the seed, and the swarm computes the statistics across seeds. A script must not loop over replicate seeds internally.
 - All seeds share the output directory, so artifact file names include the seed.
 - It exits with a non-zero status on failure and never prints made-up results.
+- It may report more metrics than the spec names, for example one per cell. All of them are stored and analysed, but model prompts carry only the spec's metrics in full and name the rest, so extra metrics do not inflate the cost of interpretation and drafting.
+- When the spec refers to earlier experiments (for example "the cells E11 locked"), the engineer is shown the completed runs of those experiments and their artifact files, and the script reads them from `../R###/artifacts/`. The run directory is the working directory when the script runs.
 
 ### How runs are executed
 
@@ -176,20 +178,22 @@ research-pilot experiments ingest <project> R004 projects/<project>/experiments/
 research-pilot run <project>
 ```
 
-Seeds are independent, so you can run them in parallel. `ingest` accepts the script's stdout (`RESULT_JSON` lines), plain JSON lines, a JSON list of `{arm, seed, metrics}` records, or `{"records": [...]}`. It warns about arms, seeds or metrics that are missing and records each warning on the run. Ingested results are final, so check the output before you ingest it.
+Seeds are independent, so you can run them in parallel. `ingest` accepts the script's stdout (`RESULT_JSON` lines), plain JSON lines, a JSON list of `{arm, seed, metrics}` records, or `{"records": [...]}`. It warns about arms, seeds or metrics that are missing, and about result lines it could not use (not valid JSON, no `arm` or `metrics`, or a metric value that is not a number), and records each warning on the run as a deviation. Ingested results are final, so check the output before you ingest it.
 
 If you trust a script and want it run for you, `research-pilot experiments execute <project> R004` runs every seed with the configured Python (`EXPERIMENT_PYTHON`) and ingests the results.
 
 ### Review checklist
 
-Generated code needs a human reviewer. On the label-smoothing project, five of seven scripts needed a fix before they produced valid results. Check at least:
+Generated code needs a human reviewer. On the label-smoothing project, eight of twelve scripts needed a reviewer's intervention before they produced valid results. Check at least:
 
 1. **Safety.** No network access, no subprocesses, no deletion, and no writes outside `--output-dir`.
 2. **Fidelity to the spec.** Arms, metric names, tuning grids and seeds match the approved experiment (`research-pilot show <project> experiments`). One script let the label-smoothing arm select eps=0, which turned it into the baseline it was compared with.
 3. **One replicate per seed.** Another script looped over all twenty replicates inside every invocation; running it per seed would have counted the same data twenty times.
 4. **Self-checks that stop the script.** Run one seed first. Gates written by the model can fail for the wrong reason: one failed on optimiser tolerance rather than on an error, one had a z-score threshold that 10% of seeds failed by chance, and one had hand-written test cases that contradicted the hypothesis's own decision rules.
-5. **Plain bugs.** One script crashed on a mistyped dictionary key.
-6. **Runtime.** Time one seed and multiply.
+5. **Numerics.** In one script numpy's 400-node Gauss-Hermite rule returned NaN for a third of its weights, and the solver silently drifted to a wrong answer. Another computed its exact reference from one Monte Carlo sample shared by every replicate, a fixed offset that the statistics could read as bias.
+6. **Inputs from earlier runs.** A script that builds on an earlier run must read files and keys that run actually wrote. One looked for fields its upstream runs never produced and stopped at load; check its paths and keys against `../R###/artifacts/`.
+7. **Plain bugs.** One script crashed on a mistyped dictionary key.
+8. **Runtime.** Time one seed and multiply.
 
 ### Fixing a script
 
@@ -211,7 +215,7 @@ Every project has hard budgets, and all of them are **cumulative across resumes*
 |---|---|---|
 | Cost | `MAX_COST_USD` | The project stops with outcome `budget_exhausted`. When the write-up reserve is all that is left, the orchestrator writes and reviews the manuscript before anything else. The reserve is $0.75, or 1.25 times the project's last recorded cost of drafting and reviewing if that is higher, so a long manuscript cannot squeeze out the review. |
 | Steps | `MAX_STEPS`, or `run --max-steps N` | The project stops with outcome `step_limit`. A step is one orchestrator action; two steps before the limit the manuscript is written. |
-| Experiment runs | `MAX_EXPERIMENT_RUNS`, `MAX_RUNS_PER_SPEC` | The planner stops proposing runs. |
+| Experiment runs | `MAX_EXPERIMENT_RUNS`, `MAX_RUNS_PER_SPEC` | Further runs are skipped. The planner can still revise the proposal and hypotheses and design experiments that will not run, until the cost reserve or the step limit forces the write-up; on the label-smoothing project that cost about $2.60. |
 | Review rounds | `MAX_REVIEW_ROUNDS` | Further red-team rounds stop; a final review still runs at the end. |
 | Tokens, time | `MAX_TOTAL_TOKENS`, `MAX_SECONDS` | The project stops; at 70% of a token budget the manuscript is written first. |
 
@@ -219,7 +223,7 @@ The cost cap is checked between steps, so the last step can go slightly over it.
 
 `MAX_COST_USD` is the project's cap, not your provider balance. Keep a few dollars more in your provider account than the project may still spend: OpenRouter rejects a request with HTTP 402 when the balance is too low, and it can count a call's full output allowance (`max_tokens`) when checking, which for a strong-tier call can exceed a dollar. If that happens mid-run, the step fails cleanly and nothing is charged; see [Troubleshooting](#troubleshooting).
 
-What it costs in practice: on the label-smoothing project, which ran mostly on the recommended mix, a first reviewed draft with two completed experiments cost **$6.75**, and seven experiments with three review rounds cost **$10.76**. Most of the spend was experiment design and critique on the strong tier: a later session spent $2.91 revising one hypothesis and designing three experiments, and the provider credit ran out before any of them ran. The cheapest saving is to move those tasks to the standard tier:
+What it costs in practice: on the label-smoothing project, which ran mostly on the recommended mix, a first reviewed draft with two completed experiments cost **$6.75**, seven experiments with three review rounds cost **$10.76**, and the finished project, twelve experiments and four review rounds, cost **$23.02**. The final manuscript and review cost $0.70. The draft before it cost $1.19 without a review, because full per-cell metric tables made its drafting prompt 516,000 tokens long; with prompts now bounded, the final drafting prompt was 96,000 tokens. Most of the spend was experiment design and critique on the strong tier: one session spent $2.91 revising one hypothesis and designing three experiments, and the provider credit ran out before any of them ran. The cheapest saving is to move those tasks to the standard tier:
 
 ```bash
 LLM_TASK_OVERRIDES=critique.design=standard,hypothesis.design=standard
