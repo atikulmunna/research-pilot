@@ -14,6 +14,10 @@ def _fmt(value: float | None, digits: int = 4) -> str:
 
 
 Values = Dict[Tuple[str, str], List[float]]
+# Limits for what goes into model prompts; the stored analysis keeps every value.
+MAX_SUMMARY_ROWS = 60
+MAX_NAMED_EXTRAS = 30
+MAX_ANOMALY_LINES = 25
 
 
 def _group_values(run: ExperimentRun) -> Values:
@@ -158,10 +162,25 @@ def comparison_table(result: QuantResult) -> str:
 
 
 def summary_table(result: QuantResult) -> str:
+    """Per-arm summaries of the compared (pre-registered) metrics. Other reported metrics are only named, because
+    scripts can report hundreds of per-cell values and every row would go into a model prompt."""
+    declared = {c.metric for c in result.comparisons} | {c.metric.split(" (")[0].strip() for c in result.comparisons}
+    shown = [s for s in result.summaries if s.metric in declared] if declared else result.summaries[:MAX_SUMMARY_ROWS]
     rows = ["| metric | arm | n | mean | std | 95% CI |", "|---|---|---|---|---|---|"]
-    for s in result.summaries:
-        rows.append(f"| {s.metric} | {s.arm} | {s.n} | {_fmt(s.mean)} | {_fmt(s.std)} | [{_fmt(s.ci_low)}, {_fmt(s.ci_high)}] |")
+    rows += [f"| {s.metric} | {s.arm} | {s.n} | {_fmt(s.mean)} | {_fmt(s.std)} | [{_fmt(s.ci_low)}, {_fmt(s.ci_high)}] |" for s in shown]
+    extra = sorted({s.metric for s in result.summaries} - {s.metric for s in shown})
+    if extra:
+        names = ", ".join(extra[:MAX_NAMED_EXTRAS]) + (f", and {len(extra) - MAX_NAMED_EXTRAS} more" if len(extra) > MAX_NAMED_EXTRAS else "")
+        rows.append(f"\n{len(extra)} further reported metrics are summarised in analysis/quantitative/{result.run_id}.yaml: {names}")
     return "\n".join(rows)
+
+
+def anomaly_lines(result: QuantResult) -> str:
+    """The code-detected anomalies as a bullet list, capped for prompts; the full list stays in the stored result."""
+    lines = [f"- {a}" for a in result.anomalies[:MAX_ANOMALY_LINES]]
+    if len(result.anomalies) > MAX_ANOMALY_LINES:
+        lines.append(f"- and {len(result.anomalies) - MAX_ANOMALY_LINES} more in analysis/quantitative/{result.run_id}.yaml")
+    return "\n".join(lines) or "(none)"
 
 
 class QuantitativeAnalyst(Agent):
@@ -177,8 +196,7 @@ class QuantitativeAnalyst(Agent):
         summary = self.ask(
             "stats.summary",
             f"Experiment {spec.key} ({spec.kind}) for hypothesis {spec.hypothesis_id}.\n\nPer-arm summaries:\n{summary_table(result)}\n\n"
-            f"Comparisons:\n{comparison_table(result)}\n\nAnomalies detected by code:\n"
-            + ("\n".join(f"- {a}" for a in result.anomalies) or "(none)")
+            f"Comparisons:\n{comparison_table(result)}\n\nAnomalies detected by code:\n{anomaly_lines(result)}"
             + "\n\nSummarise what these numbers establish and list the constraints on interpreting them.",
             StatsSummary,
             {"comparisons": [c.model_dump() for c in result.comparisons], "run_id": run.id},

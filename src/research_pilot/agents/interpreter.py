@@ -3,7 +3,7 @@ from typing import Any, Dict, List, Tuple
 from ..state.models import ExperimentRun, ExperimentSpec, Hypothesis, Interpretation, QuantResult, TaskEnvelope, now_iso
 from .base import Agent, as_yaml, clip, paper_digest, ranked_papers
 from .hypothesis import HYPOTHESIS_FIELDS
-from .quant_analyst import comparison_table, summary_table
+from .quant_analyst import anomaly_lines, comparison_table, summary_table
 
 
 def verdict_bounds(quant: QuantResult) -> Tuple[bool, bool]:
@@ -74,7 +74,7 @@ class ScientificInterpreter(Agent):
             f"Run {run.id}: {len(run.records)} records, seeds {run.seeds}" + (" [SYNTHETIC RESULTS]" if run.synthetic else ""),
             "Per-arm summaries:\n" + summary_table(quant),
             "Comparisons:\n" + comparison_table(quant),
-            "Anomalies:\n" + ("\n".join(f"- {a}" for a in quant.anomalies) or "(none)"),
+            "Anomalies:\n" + anomaly_lines(quant),
             "Interpretation constraints:\n" + "\n".join(f"- {c}" for c in quant.interpretation_constraints),
             "Related literature:\n" + paper_digest(papers),
         ]

@@ -127,3 +127,22 @@ def test_metrics_match_by_identifier_when_names_carry_descriptions():
     result = analyze_run(run_with([0.80, 0.81, 0.82], [0.70, 0.71, 0.72]), spec, 0.05)
     assert result.comparisons and result.comparisons[0].primary and result.comparisons[0].significant
     assert not [a for a in result.anomalies if a.startswith("coverage: metrics never reported")]
+
+
+def test_prompt_tables_name_extra_metrics_instead_of_listing_them():
+    from research_pilot.agents.quant_analyst import MAX_ANOMALY_LINES, anomaly_lines, summary_table
+
+    records = [
+        RunRecord(arm=arm, seed=seed, metrics={"acc": 0.8 + 0.01 * seed, **{f"cell_{i}": float(i) for i in range(100)}})
+        for arm in ("proposed", "baseline")
+        for seed in range(3)
+    ]
+    run = ExperimentRun(id="R001", experiment_id="E1", spec_version=1, hypothesis_id="H1", seeds=[0, 1, 2], records=records)
+    result = analyze_run(run, SPEC, 0.05)
+    table = summary_table(result)
+    assert "| acc | proposed |" in table and "| cell_5 |" not in table
+    assert "100 further reported metrics are summarised in analysis/quantitative/R001.yaml" in table
+    assert table.count("\n") < 10
+    result.anomalies = [f"anomaly {i}" for i in range(MAX_ANOMALY_LINES + 5)]
+    lines = anomaly_lines(result).splitlines()
+    assert len(lines) == MAX_ANOMALY_LINES + 1 and lines[-1] == "- and 5 more in analysis/quantitative/R001.yaml"
