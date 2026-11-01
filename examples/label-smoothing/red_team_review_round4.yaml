@@ -1,0 +1,548 @@
+round: 4
+recommendation: reject
+summary: 'The manuscript is now candid that it is a protocol paper with pilot results and no frozen pre-registration.
+  It states that every hypothesis is at HYPOTHESIS level and every run is inconclusive. It also discloses most deviations,
+  including the R004, R005 and R007 code repairs, so RT3-14 is resolved. The decisive problem is unchanged. The
+  title question (does LS ever beat tuned L2 plus post-hoc scaling, and in which regimes) is not answered:
+
+  - H1, the only confirmatory hypothesis, is untested.
+
+  - 0 of 3 central claims are SUPPORTED.
+
+  - The primary run (R001) pools self-defined cells with a non-early-stopped MLP.
+
+  - R009, R010 and R012 run on reconstructed generators.
+
+  - No reproducible specification of generators, grids or regimes appears in the paper.
+
+
+  Known internal contradictions remain unresolved:
+
+  - The sign of the tuned-baseline miscalibration differs across R001, R002 and R003.
+
+  - The de-smoothing results in R001 and R005 point in opposite directions.
+
+  - The R006 MDE cannot be reconciled with the R001 precision.
+
+  - Holm families are undefined.
+
+  - Table 1 defects persist.
+
+
+  New problems in this round:
+
+  - Two calibration-slope figures for R010 and R012 (about -0.25 vs -0.05 at eps=0.1) are not reconciled.
+
+  - The R011 numerical-gate failures at tau=4 are undisclosed.
+
+  - In R009, 59% of matched-grid eps selections hit the grid edge, which suggests the LS arm is under-tuned.
+
+  - The R009 nested-LS vs tuned eps=0 CI excludes zero, but the paper does not discuss this.
+
+  - The R012 ''calibrated cell'' labels reuse the same 20 replicates that are later tested.
+
+  - The real-data consistency checks are never reported.
+
+
+  The novelty rating is incremental and the main null is largely predictable, so significance stays low. A top venue
+  would reject this as an unexecuted protocol accompanied by inconsistent pilots.'
+issues:
+- id: RT4-1
+  severity: critical
+  dimension: experiments
+  description: 'The core question remains untested (continuation of RT1-1/RT2-1/RT3-1).
+
+    - H1, the single confirmatory hypothesis, is explicitly not tested by any run.
+
+    - No regime is shown in which the tuned baseline is overconfident and LS is then compared head-to-head under
+    a frozen grid.
+
+    - R001 pools self-defined cells. R009 and R012 use a reconstructed grid. R008 omits the C1, C5 and C7 cells
+    that were the only overconfident candidates.
+
+    - Q-c is acknowledged as unsettled (R004 compares different curve points).
+
+
+    The paper therefore contributes a design plus scattered pilot nulls and no answer to the title question.'
+  affected_claims:
+  - C48
+  - C49
+  - C50
+  - C58
+  required_action: experiment
+  suggestion: Freeze the E1/E11 cell definitions and grids with a hash. Run E12 (H1) on the real locked grid with
+    A/B conditioning and per-cell Holm/TOST computed by an included aggregator. Report regime-resolved verdicts
+    for LR and the early-stopped MLP. Alternatively, retitle and reframe as a protocol-only submission (a registered-report
+    format).
+  status: open
+  round: 4
+- id: RT4-2
+  severity: major
+  dimension: reproducibility
+  description: 'The paper still cannot be reproduced (continuation of RT1-3/RT2-3/RT3-2).
+
+    - Section 4 states that the eps, C, MLP-width and fold grids are ''in the run artefacts and are not reproduced
+    here''.
+
+    - Generators are self-defined (R001, R005 regimes R1-R5), assumed (R003 G9/G9''), stand-ins (R006, R007) or
+    reconstructions (R009, R010, R012).
+
+    - E6 frozen values were reconstructed in R010.
+
+    - No configuration hash or frozen specification exists.'
+  affected_claims:
+  - C48
+  - C50
+  - C51
+  - C52
+  - C53
+  required_action: revision
+  suggestion: 'Add an appendix table listing, per run:
+
+    - generator family, d, n, K, link and separability parameters;
+
+    - eps, C or weight-decay and TS grids;
+
+    - MLP width, optimiser, epochs and patience;
+
+    - outer and inner folds, seeds and bootstrap resamples;
+
+    - the regime thresholds.
+
+    Release the code and the frozen config with a hash.'
+  status: open
+  round: 4
+- id: RT4-3
+  severity: major
+  dimension: statistics
+  description: 'Holm families are still undefined (continuation of RT1-4/RT2-8/RT3-9). This makes the reported p-values
+    uninterpretable:
+
+    - R001 p=1.0;
+
+    - R003 p=0.9731;
+
+    - R004 p=0.1795;
+
+    - R005 p=0.0583;
+
+    - R009 p=0.4858, and calibration component p=0.0413.
+
+    In R009 the unadjusted CI for nested LS minus tuned eps=0, [-0.0016, -0.0001], excludes zero, while the Holm
+    p is 0.4858. That implies a large and unstated family. The calibration-component result (p=0.0413) is reported
+    as if Holm-significant without any family definition. Fold dependence (no Nadeau-Bengio intervals) and the any-metric
+    versus joint ambiguity in H1 remain open.'
+  affected_claims:
+  - C50
+  - C52
+  - C54
+  required_action: analysis
+  suggestion: For every run, enumerate the hypotheses in each Holm family (metric × cell × arm contrast). Report
+    both unadjusted and adjusted p-values. Use fold-dependence-corrected or seed-level intervals. State whether
+    H1 is decided on log loss alone.
+  status: open
+  round: 4
+- id: RT4-4
+  severity: major
+  dimension: experiments
+  description: 'R009 has two problems that bear directly on the LS-versus-baseline comparison, and neither is discussed
+    as such.
+
+    - Nested-tuned LS beats tuned eps=0 with a CI that excludes zero ([-0.0016, -0.0001]). The abstract mentions
+    this only in passing.
+
+    - In the matched-grid LS variant, 59% of eps selections fall at the grid edge. A grid that truncates the optimum
+    under-tunes the LS arm, which biases the comparison against LS.
+
+    - The R008 deviations state that the grid-edge extension rule (extend once if more than 10% of selections hit
+    the edge) was not applied in-script. No evidence shows it was applied afterwards.'
+  affected_claims:
+  - C50
+  required_action: experiment
+  suggestion: Apply the pre-specified grid-extension rule and re-run the matched-grid LS arm. Report the eps-selection
+    histogram. Discuss the R009 nested LS vs eps=0 result explicitly as a small, unadjusted LS advantage that disappears
+    against eps0+TS.
+  status: open
+  round: 4
+- id: RT4-5
+  severity: major
+  dimension: experiments
+  description: 'The calibration-slope evidence in R010 and R012 is internally inconsistent or under-explained.
+
+    - The abstract and Table 10 report slope 0.9996 at eps=0, 0.7474 at eps=0.1 and 0.5956 at eps=0.2. That is a
+    drop of about 0.25 at eps=0.1.
+
+    - Table 12, with L2 fixed, reports s(0.1)-s(0) = -0.0518 and s(0.2)-s(0) = -0.0948. These drops are roughly
+    five times smaller.
+
+    - The text does not say which cells, n and C each table uses, or why holding L2 fixed changes the shrinkage
+    this much.
+
+    - No comparison is made between the observed slopes and the population shrinkage factor c solved in R011. That
+    comparison is the natural mechanistic test of H3.'
+  affected_claims:
+  - C51
+  - C55
+  required_action: analysis
+  suggestion: State the cell, n, C and tuning status behind each slope table. Overlay the observed slope against
+    the R011 quadrature prediction c(eps) for the same generator. Explain the gap between the two tables, for example
+    tuned C partially undoing LS shrinkage.
+  status: open
+  round: 4
+- id: RT4-6
+  severity: major
+  dimension: claims
+  description: 'The numerical gate (R011, C55) is reported as ''relative deviation 0.0000 ... favourable''. The
+    R011 deviations, however, record genuine failed checks at tau=4:
+
+    - quadrature node agreement about 1e-6 against a 1e-8 threshold;
+
+    - c node agreement about 6e-8 against a 1e-10 threshold.
+
+    They also record two numerical-bug repairs: the hermegauss(400) NaN weights and the SE floor at eps=0. The Stage-0
+    gate items are also missing: the sklearn coefficient match, gradient checks and the H7(a) leakage permutation
+    test. Experiments proceeded without a documented gate pass.'
+  affected_claims:
+  - C55
+  required_action: revision
+  suggestion: Report every R011 check with its threshold and pass/fail status, including the tau=4 failures. Disclose
+    the R010 Gauss-Hermite reference repair, the R011 bug fixes and the R012 import-of-R009 repair. Report the sklearn-match,
+    gradient and leakage gate results, or state that the gate was not passed.
+  status: open
+  round: 4
+- id: RT4-7
+  severity: major
+  dimension: methodology
+  description: The overconfidence conditioning is double-dipped (continuation of RT1-6). R012 labels cells 'calibrated'
+    (18 LR, 2 MLP) using E11's rule (90% t-interval of signed error within ±0.01). That rule is applied to E12's
+    eps0_tuned over the same 20 replicates whose outcomes are then analysed. The selection and the test share data,
+    which invites regression-to-the-mean bias in any A/B-conditioned H1 verdict.
+  affected_claims:
+  - C49
+  - C50
+  required_action: analysis
+  suggestion: Classify cells using held-out pilot replicates (e.g. the seeds 5000-5014 pilot design), or use sample
+    splitting, before testing LS benefit within each class.
+  status: open
+  round: 4
+- id: RT4-8
+  severity: major
+  dimension: methodology
+  description: 'The sign of the tuned-baseline miscalibration is still unreconciled across runs (continuation of
+    RT3-4):
+
+    - R001: -0.0069 against the truth;
+
+    - R002: -0.0027, top-label versus accuracy;
+
+    - R003: +0.0159 against the truth;
+
+    - R008: -0.0003.
+
+    The metrics also differ: confidence minus accuracy versus signed error against the truth. The text says ''I
+    have not reconciled them''. In R003 the baseline is overconfident and LS reduces the error to +0.0023. That
+    is H1''s precondition plus a favourable direction, yet it is not analysed as H1-relevant.'
+  affected_claims:
+  - C49
+  - C52
+  required_action: analysis
+  suggestion: Report signed error against the truth and against accuracy for the same arms across R001, R003, R008
+    and R009 on aligned cells. Explain the differences in terms of generator, n and tuning pipeline. Analyse the
+    R003 cells with a positive baseline error as an exploratory H1 subset.
+  status: open
+  round: 4
+- id: RT4-9
+  severity: major
+  dimension: experiments
+  description: The de-smoothing results conflict across runs. R001 shows a worsening (Brier 0.3446 vs 0.3383; log
+    loss +0.0167 vs +0.0033 relative to eps0_cvts). R005 shows an improvement (-0.0106, 3 seeds, 21.9% clipped,
+    Holm p from 5 folds of one seed). The text concedes that a bug cannot be excluded. C54 nonetheless reports the
+    R005 effect as a finding.
+  affected_claims:
+  - C54
+  required_action: experiment
+  suggestion: Unit-test de-smoothing on known P(y|x), where the exact inverse should recover the eps=0 population
+    fit. Re-run R005 with seed-level pooling and the clip-floor sensitivity (1e-4, 1e-8) reported. Otherwise drop
+    C54.
+  status: open
+  round: 4
+- id: RT4-10
+  severity: major
+  dimension: statistics
+  description: 'Power remains unresolved (continuation of RT3-5 and RT1-10).
+
+    - R006''s MDE of 0.0294 is set aside as irreconcilable, but no valid power analysis replaces it.
+
+    - R008 emits its power metrics as NaN.
+
+    - The R004 accuracy TOST, ceiling and CI-width rules were never computed.
+
+    Without an equivalence margin and power, the nulls in R001, R003 and R004 cannot be read as evidence of absence.'
+  affected_claims:
+  - C50
+  - C52
+  - C53
+  required_action: analysis
+  suggestion: Run the cross-seed aggregator. Compute seed-level SDs of the paired differences and report the MDE
+    for each primary contrast. Pre-state equivalence margins for log loss and accuracy, with a justification, and
+    run TOST.
+  status: open
+  round: 4
+- id: RT4-11
+  severity: major
+  dimension: baselines
+  description: 'Baselines and protocols are still uneven (continuation of RT1-8/RT2-9/RT3-10).
+
+    - Platt, vector scaling and isotonic calibration are absent.
+
+    - The R001 MLP has no early stopping (fixed 150 epochs). R004 uses an 80/20 early-stopping hold-out, R009 a
+    15% hold-out, and R012 is capped at 200 epochs.
+
+    - Tuning-budget equalisation is attempted only through R009''s matched grid, which is edge-saturated.
+
+    - H5 (LS as a substitute for early stopping) is untested.'
+  affected_claims:
+  - C50
+  - C59
+  required_action: experiment
+  suggestion: Add Platt/vector scaling and isotonic arms. Use one shared early-stopped MLP specification across
+    all runs. Report the number of tuning trials per arm and compare at an equal budget.
+  status: open
+  round: 4
+- id: RT4-12
+  severity: major
+  dimension: statistics
+  description: 'R002 integrity issues remain unexplained (continuation of RT2-4/RT3-6). The current text silently
+    drops the earlier n=8-per-cell statement, the fam1_check_pass=0.8 value and the ''fires'' proxies, without explaining:
+
+    - how failing replicates were handled, given the declared STOP rule;
+
+    - whether replicates were excluded.
+
+    R002''s own 10-replicate gate statistics were never computed (they were left downstream), yet R002 CIs are quoted.'
+  affected_claims:
+  - C49
+  required_action: analysis
+  suggestion: Report the per-cell replicate counts actually used and the check-failure handling. Report the source
+    of the R002 CIs (which aggregator, which statistic). Define the 'fires' proxies or remove them.
+  status: open
+  round: 4
+- id: RT4-13
+  severity: major
+  dimension: claims
+  description: 'Claims still exceed the analyses performed (continuation of RT3-11).
+
+    - C48 still describes the design as ''pre-registered'', which contradicts the abstract''s ''no frozen, timestamped
+    pre-registration''.
+
+    - C53 states that accuracy intervals are ''well inside the -1 pp margin'' without TOST.
+
+    - C51 calls LS-induced underconfidence ''strong'', although this holds at fixed eps by construction and was
+    measured on reconstructed generators.
+
+    The automated checks flag C48-C55 as exceeding the evidence.'
+  affected_claims:
+  - C48
+  - C51
+  - C53
+  required_action: revision
+  suggestion: Remove 'pre-registered' from C48. Rephrase C53 as point estimates without an inferential claim until
+    TOST is run. Qualify C51 as describing fixed-eps population-scale shrinkage on reconstructed generators.
+  status: open
+  round: 4
+- id: RT4-14
+  severity: major
+  dimension: significance
+  description: 'Significance is low (continuation of RT1-11/RT2-11/RT3-12).
+
+    - The novelty analysis rates the work incremental (63 papers searched).
+
+    - The predominant null, that tuned L2 plus TS leaves little room for LS on well-specified synthetic LR, is predictable
+    from the population solution.
+
+    - The positive effects (constrained L2 is overconfident; LS shrinks the slope) hold by construction.
+
+    - The real-data consistency checks (breast_cancer, iris, wine) are mentioned but no results are reported.'
+  affected_claims:
+  - C48
+  required_action: experiment
+  suggestion: 'Report the real-data results with fold-dependence-corrected intervals and add more tabular datasets.
+    Target regimes where theory predicts LS could help: very small n, near-separable data, misspecified link, or
+    the absence of a calibration split. Articulate the practitioner decision the result would change.'
+  status: open
+  round: 4
+- id: RT4-15
+  severity: major
+  dimension: reproducibility
+  description: 'Most rigorous analyses were deferred to aggregators that are not included (continuation of RT3-13):
+
+    - the R002 gate statistics;
+
+    - the R004 bootstrap, Holm and TOST;
+
+    - R005 seed pooling;
+
+    - the R007, R009 and R010 permutation, TOST and Holm analyses.
+
+    The R006 registry shows 19 of 20 seeds missing for every arm, yet Section 4 lists seeds 2000-2019 without explanation.
+    R007 outputs are mostly NaN. The source of the CIs and Holm values quoted in Tables 3, 4, 9 and 10 is not documented.'
+  affected_claims:
+  - C50
+  - C52
+  - C53
+  required_action: revision
+  suggestion: Include the aggregator code and document which statistic produced each reported CI and p-value. Note
+    in Section 4 that R006 ran 20 internal replicates in a single invocation.
+  status: open
+  round: 4
+- id: RT4-16
+  severity: major
+  dimension: writing
+  description: 'Table 1 defects persist (continuation of RT2-7/RT3-8).
+
+    - The table is truncated mid-row.
+
+    - The reference arm for ''fixed_variant_log_loss_differences'' is unstated, though it appears to be eps0_cvts.
+
+    - The text gives LS vs eps0+TS as CI [-0.0026, 0.0011], but the table''s ls_best_variant row shows [-0.0025,
+    0.0010].
+
+    - The clipped fraction is not shown.
+
+    - The ablation rows cannot be verified as fixed.
+
+    - Tables 2-12 are cited but not shown.'
+  affected_claims:
+  - C50
+  - C54
+  required_action: revision
+  suggestion: Supply complete tables. Reconcile the text and table CIs. State the reference arm for each difference
+    row. Give ablation contrasts as single rows, not repeated across arms.
+  status: open
+  round: 4
+- id: RT4-17
+  severity: minor
+  dimension: reproducibility
+  description: 'Some reviewer code repairs made before execution are still undisclosed in the manuscript:
+
+    - R010: the reference w_eps was switched from a 300k Monte Carlo solve to Gauss-Hermite quadrature.
+
+    - R011: hermegauss(400) NaN weights were replaced by 300 nodes, and the SE was floored at eps=0.
+
+    - R012: the script was rewired to import R009''s cells and splits, and calibrated cells were relabelled using
+    E11''s rule on E12 replicates.
+
+    The R004, R005 and R007 repairs are now disclosed.'
+  affected_claims:
+  - C51
+  - C55
+  required_action: revision
+  suggestion: Add the R010, R011 and R012 repairs to the declared deviations.
+  status: open
+  round: 4
+- id: RT4-18
+  severity: minor
+  dimension: methodology
+  description: 'Calibration measurement remains coarse (continuation of RT1-14/RT2-12/RT3-16).
+
+    - The premise test uses top-label signed error.
+
+    - Only 15-bin equal-mass ECE is reported, with no bin sensitivity.
+
+    - The ICI [P012] is cited but not used.
+
+    - Classwise analysis was not applicable in R012 because all cells are binary.'
+  affected_claims:
+  - C49
+  required_action: analysis
+  suggestion: Add the ICI, an ECE bin-count sensitivity analysis and binned signed error against the truth by confidence
+    region.
+  status: open
+  round: 4
+- id: RT4-19
+  severity: minor
+  dimension: writing
+  description: 'There are version, section and style inconsistencies (continuation of RT2-14/RT3-15):
+
+    - The Table 1 header says H2@v1, while the introduction lists H2 v1 as superseded.
+
+    - Limitations and Discussion sections and the reference list are referenced but absent, so the RT1-12 reference
+    defects cannot be verified.
+
+    - The plain-language summary duplicates its heading.
+
+    - First-person singular (''I have not reconciled'', ''I treat'') appears in a multi-author-style paper.'
+  affected_claims:
+  - C60
+  required_action: revision
+  suggestion: Align hypothesis versions in the table headers. Include the Limitations, Discussion and References
+    sections. Fix the summary heading and voice.
+  status: open
+  round: 4
+- id: RT4-20
+  severity: minor
+  dimension: claims
+  description: Claim-status labelling is still inconsistent (continuation of RT1-13/RT2-13/RT3-17). C58-C60 are
+    factual statements about project state (nothing tested, registry revisions, coverage gaps), yet they are labelled
+    HYPOTHESIS. The automated checks flag every section as containing unsupported statements.
+  affected_claims:
+  - C58
+  - C59
+  - C60
+  required_action: revision
+  suggestion: Relabel factual limitation claims to reflect that they are verified project-state facts. Trace each
+    section's statements to claims or evidence.
+  status: open
+  round: 4
+missing_experiments:
+- E12/H1 on the real frozen E11 locked grid (including cells C1, C5 and C7), with held-out overconfidence conditioning
+  and per-cell Holm and TOST
+- Grid-extended re-run of the R009 matched-grid LS arm (59% edge selection)
+- 'H5: LS versus early stopping with a single shared early-stopped MLP specification'
+- 'H6: prior-directed shrinkage'
+- H7(a) leakage permutation test and full Stage-0 gate results (sklearn match, gradient checks)
+- Platt/vector scaling and isotonic calibration baselines
+- R003 robustness (d=30), the misspecified generator and the sensitivity analyses
+- De-smoothing unit test on known P(y|x) and the clip-floor sensitivity analysis
+- Real-data evaluation (breast_cancer, iris, wine and additional tabular sets) with Nadeau-Bengio intervals
+- 'Cross-seed aggregation: R004 TOST, ceiling and frontier area; power and MDE from seed-level SDs'
+unsupported_claims:
+- 'C48: described as ''pre-registered'' despite no frozen pre-registration'
+- 'C53: ''well inside the -1 pp margin'' without TOST or CI-width rules'
+- 'C51: ''strong underconfidence'', without reconciling the Table 10 and Table 12 slope magnitudes'
+- 'C54: de-smoothing effect reported despite the contradictory R001 result and a possible bug'
+- 'C55: ''favourable'' numerical gate omits the failed tau=4 precision checks'
+- 'C49: absence of overconfidence asserted without an equivalence bound, while R003 shows overconfidence'
+novelty_concerns:
+- Novelty analysis rates the work incremental (moderate) after searching 63 papers
+- The targeted literature search for prior LS-on-LR studies is admitted to be undocumented
+- The main null follows almost directly from the population solution (1-eps)P+eps/K plus the strength of tuned TS
+  [P042]
+methodological_concerns:
+- Overconfidence conditioning in R012 reuses the same replicates that are tested (double dipping)
+- LS eps grid is edge-saturated in R009, so the LS arm is under-tuned
+- The MLP protocol differs across runs (no early stopping, 80/20 hold-out, 15% hold-out, 200-epoch cap)
+- The sign of the baseline miscalibration flips across R001, R002, R003 and R008, with different reference metrics
+  (truth versus accuracy)
+- Top-label mean signed error can mask region-specific miscalibration
+reproducibility_concerns:
+- Generators, grids, fold counts and regime thresholds are not in the paper. Many are self-defined, assumed or reconstructed.
+- No frozen config hash
+- Aggregator code that produced the CIs and Holm p-values is not included
+- R006 effectively ran one invocation, and R007 outputs are mostly NaN
+- The R010, R011 and R012 code repairs are undisclosed
+likely_reviewer_questions:
+- Why should a protocol with no executed confirmatory test, on reconstructed generators, be published now rather
+  than after E12 on the frozen grid?
+- What are the Holm families behind p=1.0, 0.4858 and 0.0413?
+- Why does the eps=0.1 slope drop by about 0.25 in Table 10 but only 0.05 in Table 12?
+- Does the observed slope match the R011 population shrinkage factor c(eps)?
+- With 59% of eps selections at the grid edge, how do you know LS was adequately tuned?
+- How do you explain the tuned baseline being underconfident in R001 but overconfident in R003?
+- Is the R001 de-smoothing worsening a bug?
+- What are the real-data results?
+- What equivalence margin would let a null be read as 'LS does not help'?
+- Why are Platt and isotonic calibration excluded when post-hoc scaling is the baseline to beat?
+resolved_issue_ids:
+- RT3-14
+created_at: '2026-11-01T12:13:00+00:00'
